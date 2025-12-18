@@ -38,10 +38,15 @@ backend/cache/
 *.pkl
 area.osm.json
 
-# Mapas grandes
+# Mapas grandes y shapefiles
 backend/mapas/*.osm.pbf
-backend/mapas/*.shp/
+backend/mapas/*.shp
+backend/mapas/*.shx
+backend/mapas/*.dbf
+backend/mapas/*.prj
+backend/mapas/*.cpg
 backend/mapas/*.pkl
+backend/mapas/*-free.shp/
 
 # Archivos temporales
 *.tmp
