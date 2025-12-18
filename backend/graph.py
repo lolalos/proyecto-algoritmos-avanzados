@@ -1,0 +1,533 @@
+"""
+Módulo para cargar y procesar grafos viales desde datos OpenStreetMap.
+Incluye soporte para descargar mapas de regiones de Perú.
+"""
+import json
+import numpy as np
+from scipy import sparse
+from typing import Dict, List, Tuple, Optional
+import os
+
+# Importar datos de regiones y hospitales
+from regiones import (
+    DEPARTAMENTOS_PERU, 
+    get_all_departamentos,
+    get_provincias as get_provincias_data,
+    get_distritos as get_distritos_data,
+    get_distrito_query as get_distrito_query_data,
+    get_region_query
+)
+from hospitales import (
+    HOSPITALES_PERU,
+    get_hospitales_region
+)
+
+try:
+    import osmnx as ox
+    import networkx as nx
+    OSMNX_AVAILABLE = True
+except ImportError:
+    OSMNX_AVAILABLE = False
+    ox = None
+    nx = None
+
+
+class UrbanGraph:
+    """Representa un grafo de red vial urbana."""
+    
+    def __init__(self):
+        self.graph = None
+        self.adjacency_matrix = None  # Será matriz dispersa (sparse)
+        self.adjacency_list = {}  # Lista de adyacencia para acceso rápido
+        self.node_mapping = {}  # Mapeo de índice -> ID de nodo OSM
+        self.reverse_mapping = {}  # Mapeo de ID de nodo OSM -> índice
+        self.node_coordinates = {}  # Coordenadas (lat, lon) de cada nodo
+        self.edge_lengths = {}  # Longitudes de aristas
+        self.num_nodes = 0
+        self.num_edges = 0
+    
+    def load_from_osm_json(self, filepath: str) -> bool:
+        """
+        Carga un grafo desde un archivo JSON de OpenStreetMap.
+        
+        Args:
+            filepath: Ruta al archivo .osm.json
+            
+        Returns:
+            True si la carga fue exitosa
+        """
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Extraer nodos y aristas del JSON
+            nodes = {}
+            edges = []
+            
+            # Procesar elementos
+            if 'elements' in data:
+                for element in data['elements']:
+                    if element['type'] == 'node':
+                        node_id = element['id']
+                        nodes[node_id] = {
+                            'lat': element.get('lat', 0.0),
+                            'lon': element.get('lon', 0.0),
+                            'tags': element.get('tags', {})
+                        }
+                    elif element['type'] == 'way':
+                        # Las vías contienen listas de nodos
+                        way_nodes = element.get('nodes', [])
+                        tags = element.get('tags', {})
+                        
+                        # Crear aristas entre nodos consecutivos
+                        for i in range(len(way_nodes) - 1):
+                            edges.append({
+                                'source': way_nodes[i],
+                                'target': way_nodes[i + 1],
+                                'tags': tags
+                            })
+                        
+                        # Si la vía no es unidireccional, agregar aristas inversas
+                        if tags.get('oneway', 'no') != 'yes':
+                            for i in range(len(way_nodes) - 1):
+                                edges.append({
+                                    'source': way_nodes[i + 1],
+                                    'target': way_nodes[i],
+                                    'tags': tags
+                                })
+            
+            # Crear mapeos de nodos
+            node_ids = sorted(nodes.keys())
+            for idx, node_id in enumerate(node_ids):
+                self.node_mapping[idx] = node_id
+                self.reverse_mapping[node_id] = idx
+                self.node_coordinates[idx] = (
+                    nodes[node_id]['lat'],
+                    nodes[node_id]['lon']
+                )
+            
+            self.num_nodes = len(node_ids)
+            
+            # Crear matriz de adyacencia DISPERSA (sparse) usando lil_matrix para construcción eficiente
+            print(f"📊 Creando matriz dispersa para {self.num_nodes} nodos...")
+            self.adjacency_matrix = sparse.lil_matrix((self.num_nodes, self.num_nodes), dtype=np.float32)
+            self.adjacency_list = {i: [] for i in range(self.num_nodes)}
+            
+            # Llenar matriz con distancias
+            for edge in edges:
+                source_id = edge['source']
+                target_id = edge['target']
+                
+                if source_id in self.reverse_mapping and target_id in self.reverse_mapping:
+                    source_idx = self.reverse_mapping[source_id]
+                    target_idx = self.reverse_mapping[target_id]
+                    
+                    # Calcular distancia euclidiana (aproximación)
+                    lat1, lon1 = self.node_coordinates[source_idx]
+                    lat2, lon2 = self.node_coordinates[target_idx]
+                    distance = self._haversine_distance(lat1, lon1, lat2, lon2)
+                    
+                    self.adjacency_matrix[source_idx, target_idx] = distance
+                    self.adjacency_list[source_idx].append((target_idx, distance))
+                    self.edge_lengths[(source_idx, target_idx)] = distance
+                    self.num_edges += 1
+            
+            # Convertir a CSR (Compressed Sparse Row) para operaciones rápidas
+            print(f"🔄 Convirtiendo a formato CSR...")
+            self.adjacency_matrix = self.adjacency_matrix.tocsr()
+            
+            print(f"✅ Grafo cargado: {self.num_nodes} nodos, {self.num_edges} aristas")
+            print(f"💾 Memoria de matriz dispersa: ~{self.adjacency_matrix.data.nbytes / 1024 / 1024:.2f} MB")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error al cargar grafo: {e}")
+            return False
+    
+    @staticmethod
+    def get_all_departamentos():
+        """Retorna todos los departamentos disponibles."""
+        return get_all_departamentos()
+    
+    @staticmethod
+    def get_provincias(departamento_key: str):
+        """Retorna provincias de un departamento."""
+        return get_provincias_data(departamento_key)
+    
+    @staticmethod
+    def get_distritos(departamento_key: str, provincia_key: str):
+        """Retorna distritos de una provincia."""
+        return get_distritos_data(departamento_key, provincia_key)
+    
+    @staticmethod
+    def get_distrito_query(departamento_key: str, provincia_key: str, distrito_key: str):
+        """Retorna la query de OSM para un distrito específico."""
+        return get_distrito_query_data(departamento_key, provincia_key, distrito_key)
+    
+    @staticmethod
+    def get_hospitales(departamento_key: str):
+        """Retorna hospitales de un departamento."""
+        return get_hospitales_region(departamento_key)
+    
+    def check_map_cache(self, distrito_key: str = None, region_key: str = None) -> dict:
+        """Verifica si existe caché para una ubicación."""
+        cache_key = distrito_key if distrito_key else region_key
+        cache_dir = os.path.join(os.path.dirname(__file__), 'mapas')
+        cache_file = os.path.join(cache_dir, f'{cache_key}_graph.pkl')
+        
+        exists = os.path.exists(cache_file)
+        
+        return {
+            'exists': exists,
+            'cache_key': cache_key,
+            'cache_file': cache_file if exists else None,
+            'message': f"✅ Mapa disponible: {cache_key}" if exists else f"❌ Mapa no disponible. Ejecutar: python cargar_desde_shapefile.py"
+        }
+    
+    def download_region_from_osm(self, region_key: str, network_type: str = 'drive') -> bool:
+        """
+        Carga mapa desde archivo pickle local (ya procesado desde shapefile).
+        YA NO descarga desde OSM - usa datos locales de Geofabrik.
+        
+        Args:
+            region_key: Clave de región (ej: 'cusco')
+            network_type: Ignorado (mantiene compatibilidad API)
+            
+        Returns:
+            True si la carga fue exitosa
+        """
+        if region_key not in DEPARTAMENTOS_PERU:
+            print(f"❌ Región '{region_key}' no encontrada.")
+            print(f"Regiones disponibles: {', '.join(DEPARTAMENTOS_PERU.keys())}")
+            return False
+        
+        # Archivo pickle ya procesado
+        cache_dir = os.path.join(os.path.dirname(__file__), 'mapas')
+        pkl_file = os.path.join(cache_dir, f'{region_key}_graph.pkl')
+        
+        if not os.path.exists(pkl_file):
+            print(f"❌ Archivo no encontrado: {pkl_file}")
+            print(f"💡 Ejecuta primero: python cargar_desde_shapefile.py")
+            return False
+        
+        try:
+            import pickle
+            print(f"📦 Cargando {region_key} desde pickle local...")
+            
+            with open(pkl_file, 'rb') as f:
+                data = pickle.load(f)
+            
+            self.graph = data['graph']
+            self._process_networkx_graph(self.graph)
+            
+            print(f"✅ Cargado: {self.num_nodes:,} nodos, {self.num_edges:,} aristas")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error al cargar: {e}")
+            return False
+    
+    def download_distrito_from_osm(self, query: str, distrito_key: str, network_type: str = 'drive') -> bool:
+        """
+        Descarga un distrito específico desde OpenStreetMap.
+        
+        Args:
+            query: Query de OSM (ej: 'Wanchaq, Cusco, Peru')
+            distrito_key: Identificador del distrito (ej: 'wanchaq')
+            network_type: Tipo de red ('drive')
+            
+        Returns:
+            True si la descarga fue exitosa
+        """
+        if not OSMNX_AVAILABLE:
+            print("❌ OSMnx no está instalado. Instalar con: pip install osmnx")
+            return False
+        
+        # Verificar caché
+        cache_dir = os.path.join(os.path.dirname(__file__), 'mapas')
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_file = os.path.join(cache_dir, f'{distrito_key}_{network_type}.json')
+        
+        if os.path.exists(cache_file):
+            print(f"✅ Distrito '{distrito_key}' YA DESCARGADO. Cargando desde caché...")
+            success = self._load_from_cache_file(cache_file)
+            if success:
+                print(f"✅ Carga completada: {self.num_nodes} nodos, {self.num_edges} aristas")
+                return True
+            else:
+                print(f"⚠️  Error al cargar caché. Se descargará nuevamente...")
+        
+        try:
+            print(f"📥 Descargando distrito: {query}")
+            print(f"🚗 Red vehicular para ambulancias...")
+            
+            G = ox.graph_from_place(
+                query,
+                network_type=network_type,
+                simplify=True,
+                retain_all=False,
+                truncate_by_edge=True
+            )
+            
+            self.graph = G
+            self._process_networkx_graph(G)
+            
+            print(f"💾 Guardando en caché: {cache_file}")
+            self.save_to_json(cache_file)
+            
+            print(f"✅ Descarga completada: {self.num_nodes} nodos, {self.num_edges} aristas")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error al descargar distrito: {e}")
+            return False
+    
+    def _process_networkx_graph(self, G):
+        """Procesa un grafo de NetworkX a matriz de adyacencia."""
+        # Obtener lista de nodos
+        nodes = list(G.nodes())
+        self.num_nodes = len(nodes)
+        
+        # Crear mapeos
+        for idx, node_id in enumerate(nodes):
+            self.node_mapping[idx] = node_id
+            self.reverse_mapping[node_id] = idx
+            
+            # Obtener coordenadas
+            node_data = G.nodes[node_id]
+            self.node_coordinates[idx] = (
+                node_data.get('y', 0.0),  # latitud
+                node_data.get('x', 0.0)   # longitud
+            )
+        
+        # Crear matriz de adyacencia
+        self.adjacency_matrix = np.zeros((self.num_nodes, self.num_nodes), dtype=np.float32)
+        
+        # Llenar con aristas
+        for u, v, data in G.edges(data=True):
+            u_idx = self.reverse_mapping[u]
+            v_idx = self.reverse_mapping[v]
+            
+            # Usar la longitud de la arista si está disponible
+            length = data.get('length', 1.0)
+            
+            self.adjacency_matrix[u_idx, v_idx] = length
+            self.edge_lengths[(u_idx, v_idx)] = length
+            self.num_edges += 1
+    
+    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """
+        Calcula la distancia haversine entre dos coordenadas (en metros).
+        """
+        from math import radians, cos, sin, asin, sqrt
+        
+        # Radio de la Tierra en metros
+        R = 6371000
+        
+        # Convertir a radianes
+        lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+        
+        # Diferencias
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        
+        # Fórmula haversine
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+        c = 2 * asin(sqrt(a))
+        
+        return R * c
+    
+    def get_adjacency_matrix(self):
+        """Retorna la matriz de adyacencia del grafo (dispersa o densa según tamaño)."""
+        # Si la matriz es dispersa (sparse), devolverla como está
+        if sparse.issparse(self.adjacency_matrix):
+            return self.adjacency_matrix
+        return self.adjacency_matrix
+    
+    def get_adjacency_list(self) -> Dict:
+        """Retorna la lista de adyacencia del grafo."""
+        return self.adjacency_list
+    
+    def get_node_info(self, node_idx: int) -> Dict:
+        """Obtiene información de un nodo por su índice."""
+        if node_idx not in self.node_mapping:
+            return None
+        
+        return {
+            'index': node_idx,
+            'osm_id': self.node_mapping[node_idx],
+            'coordinates': self.node_coordinates.get(node_idx, (0, 0)),
+            'lat': self.node_coordinates.get(node_idx, (0, 0))[0],
+            'lon': self.node_coordinates.get(node_idx, (0, 0))[1]
+        }
+    
+    def find_nearest_node(self, lat: float, lon: float) -> int:
+        """Encuentra el nodo más cercano a una coordenada."""
+        min_dist = float('inf')
+        nearest_idx = 0
+        
+        for idx in range(self.num_nodes):
+            node_lat, node_lon = self.node_coordinates[idx]
+            dist = self._haversine_distance(lat, lon, node_lat, node_lon)
+            
+            if dist < min_dist:
+                min_dist = dist
+                nearest_idx = idx
+        
+        return nearest_idx
+    
+    def save_to_json(self, filepath: str) -> bool:
+        """Guarda el grafo en formato JSON."""
+        try:
+            data = {
+                'num_nodes': self.num_nodes,
+                'num_edges': self.num_edges,
+                'node_mapping': {str(k): v for k, v in self.node_mapping.items()},
+                'node_coordinates': {
+                    str(k): {'lat': v[0], 'lon': v[1]} 
+                    for k, v in self.node_coordinates.items()
+                },
+                'adjacency_list': {}
+            }
+            
+            # Crear lista de adyacencia para reducir tamaño
+            for i in range(self.num_nodes):
+                neighbors = []
+                for j in range(self.num_nodes):
+                    if self.adjacency_matrix[i, j] > 0:
+                        neighbors.append({
+                            'target': j,
+                            'weight': float(self.adjacency_matrix[i, j])
+                        })
+                if neighbors:
+                    data['adjacency_list'][str(i)] = neighbors
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            
+            print(f"✅ Grafo guardado en {filepath}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error al guardar grafo: {e}")
+            return False
+    
+    def _load_from_cache_file(self, filepath: str) -> bool:
+        """Carga un grafo desde un archivo de caché JSON."""
+        try:
+            print(f"📂 Validando archivo de caché...")
+            
+            # Verificar que el archivo no esté vacío o corrupto
+            file_size = os.path.getsize(filepath)
+            if file_size < 100:  # Archivo demasiado pequeño = corrupto
+                print(f"⚠️  Archivo de caché corrupto o vacío ({file_size} bytes). Eliminando...")
+                os.remove(filepath)
+                return False
+            
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Validar que tenga los campos necesarios
+            required_fields = ['num_nodes', 'num_edges', 'node_mapping', 'adjacency_list']
+            for field in required_fields:
+                if field not in data:
+                    print(f"⚠️  Caché incompleto (falta {field}). Eliminando...")
+                    os.remove(filepath)
+                    return False
+            
+            # Validar que tenga datos válidos
+            if data['num_nodes'] == 0 or data['num_edges'] == 0:
+                print(f"⚠️  Caché sin datos válidos. Eliminando...")
+                os.remove(filepath)
+                return False
+            
+            self.num_nodes = data['num_nodes']
+            self.num_edges = data['num_edges']
+            
+            # Reconstruir mapeos
+            self.node_mapping = {int(k): v for k, v in data['node_mapping'].items()}
+            self.reverse_mapping = {v: int(k) for k, v in data['node_mapping'].items()}
+            self.node_coordinates = {
+                int(k): (v['lat'], v['lon']) 
+                for k, v in data['node_coordinates'].items()
+            }
+            
+            # Reconstruir matriz de adyacencia
+            self.adjacency_matrix = np.zeros((self.num_nodes, self.num_nodes), dtype=np.float32)
+            
+            for source_str, neighbors in data['adjacency_list'].items():
+                source = int(source_str)
+                for neighbor in neighbors:
+                    target = neighbor['target']
+                    weight = neighbor['weight']
+                    self.adjacency_matrix[source, target] = weight
+                    self.edge_lengths[(source, target)] = weight
+            
+            print(f"✅ Caché validado correctamente")
+            return True
+            
+        except json.JSONDecodeError as e:
+            print(f"❌ Archivo de caché corrupto (JSON inválido): {e}")
+            print(f"🗑️  Eliminando archivo corrupto...")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return False
+        except Exception as e:
+            print(f"❌ Error al cargar desde caché: {e}")
+            print(f"🗑️  Eliminando archivo problemático...")
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return False
+    
+    def find_nearest_hospitals(self, lat: float, lon: float, region_key: str, max_hospitals: int = 5) -> List[Dict]:
+        """
+        Encuentra los hospitales más cercanos a una ubicación.
+        Usa datos de hospitales.py automáticamente.
+        
+        Args:
+            lat: Latitud de la ubicación
+            lon: Longitud de la ubicación
+            region_key: Región donde buscar hospitales
+            max_hospitals: Número máximo de hospitales a retornar
+            
+        Returns:
+            Lista de hospitales con nodo más cercano y distancia
+        """
+        # Obtener hospitales de la región desde hospitales.py
+        hospitales = get_hospitales_region(region_key)
+        
+        if not hospitales:
+            print(f"ℹ️  No hay hospitales registrados para {region_key}")
+            return []
+        
+        hospitales_cercanos = []
+        
+        for hospital in hospitales:
+            # Encontrar nodo más cercano al hospital en el mapa cargado
+            hospital_node = self.find_nearest_node(hospital['lat'], hospital['lon'])
+            
+            # Calcular distancia desde ubicación del usuario
+            user_node = self.find_nearest_node(lat, lon)
+            
+            # Distancia haversine directa (línea recta en km)
+            dist_directa = self._haversine_distance(
+                lat, lon, 
+                hospital['lat'], hospital['lon']
+            )
+            
+            hospitales_cercanos.append({
+                'name': hospital['name'],
+                'tipo': hospital.get('tipo', 'General'),
+                'nivel': hospital.get('nivel', 'II-1'),
+                'lat': hospital['lat'],
+                'lon': hospital['lon'],
+                'node_index': hospital_node,
+                'distance_direct_m': dist_directa,
+                'distance_direct_km': dist_directa / 1000
+            })
+        
+        # Ordenar por distancia
+        hospitales_cercanos.sort(key=lambda x: x['distance_direct_m'])
+        
+        print(f"🏥 Encontrados {len(hospitales_cercanos)} hospitales en {region_key}")
+        return hospitales_cercanos[:max_hospitals]

@@ -1,0 +1,29 @@
+# Dependencias del proyecto - Algoritmos de Caminos Más Cortos con CUDA
+
+# Framework web
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Procesamiento numérico
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Aceleración GPU con CUDA (OPCIONAL - descomentar si tienes CUDA instalado)
+# cupy-cuda12x>=12.0.0  # Para CUDA 12.x
+# cupy-cuda11x>=12.0.0  # Para CUDA 11.x
+# numba>=0.58.0
+
+# Grafos y mapas (OPCIONAL - para descargar mapas de OSM)
+# osmnx>=1.6.0
+# networkx>=3.0.0
+# geopandas>=0.14.0
+
+# Utilidades
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+psutil>=5.9.0  # Para información del sistema (CPU, RAM)
+
+# Opcional: Visualización y análisis
+# matplotlib>=3.8.0
+# pandas>=2.0.0
