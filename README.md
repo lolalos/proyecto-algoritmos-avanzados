@@ -69,6 +69,8 @@ Este proyecto implementa y compara cuatro algoritmos de caminos más cortos con 
   - Uso: Acceso rápido a vecinos durante carga de datos
 
 #### Datos de Entrada
+
+##### 1. Red Vial - OpenStreetMap (OSM)
 - **Fuente**: OpenStreetMap (OSM) formato JSON
 - **Región**: Departamento de Cusco, Perú
 - **Archivo**: `area.osm.json` (64,530 líneas, ~1.8M nodos)
@@ -76,6 +78,31 @@ Este proyecto implementa y compara cuatro algoritmos de caminos más cortos con 
   - Nodos: Coordenadas GPS (lat, lon)
   - Ways: Secuencias de nodos formando calles
   - Tags: Metadatos de tipo de vía (highway, name, etc.)
+
+##### 2. Red Vial Oficial - MTC (Ministerio de Transportes y Comunicaciones)
+- **Fuente**: Portal de Datos Abiertos del MTC
+- **URL**: https://portal.mtc.gob.pe/estadisticas/datos_abiertos.html
+- **Datasets disponibles**:
+  - Red Vial Nacional (SINAC - Sistema Nacional de Carreteras)
+  - Red Vial Departamental
+  - Red Vial Vecinal y Rural
+- **Formato**: Shapefiles (SHP) con geometrías LineString
+- **Proyección**: WGS84 (EPSG:4326)
+
+##### 3. Establecimientos de Salud - MINSA (Ministerio de Salud)
+- **Fuente**: Registro Nacional de Establecimientos de Salud (RENAES)
+- **URL**: https://www.datosabiertos.gob.pe/group/salud
+- **Portal**: GeoMINSA (Infraestructura de Datos Espaciales del MINSA)
+- **Categorías incluidas**:
+  - I-1: Puesto de Salud
+  - I-2: Puesto de Salud con Médico
+  - I-3: Centro de Salud sin Internamiento
+  - I-4: Centro de Salud con Internamiento
+  - II-1: Hospital I
+  - II-2: Hospital II
+  - III-1: Hospital III
+  - III-2: Hospital Nacional/Regional
+- **Datos**: Coordenadas GPS, nombre, categoría, servicios disponibles
 
 ### 1.3. Configuración Experimental
 
@@ -92,12 +119,36 @@ Este proyecto implementa y compara cuatro algoritmos de caminos más cortos con 
 - **Python**: 3.13.7
 - **Backend**: FastAPI + Uvicorn
 - **Frontend**: Leaflet.js + Vanilla JavaScript
-- **Librerías principales**:
-  - `scipy`: Matrices sparse (CSR, LIL)
-  - `numpy`: Operaciones vectorizadas
-  - `cupy-cuda13x`: Aceleración GPU (13.6.0)
-  - `psutil`: Monitoreo de recursos
-  - `heapq`: Colas de prioridad
+
+##### Librerías Python Utilizadas
+
+**Framework Web:**
+- `fastapi` (>=0.104.0): Framework web moderno de alto rendimiento
+- `uvicorn[standard]` (>=0.24.0): Servidor ASGI para FastAPI
+- `python-multipart` (>=0.0.6): Soporte para formularios multipart
+- `pydantic` (>=2.0.0): Validación de datos y configuración
+
+**Procesamiento Numérico y Científico:**
+- `numpy` (>=1.24.0): Operaciones matriciales vectorizadas
+- `scipy` (>=1.11.0): Matrices sparse (CSR, LIL) y algoritmos científicos
+- `pandas` (>=2.0.0): Manipulación y análisis de datos tabulares
+
+**Aceleración GPU con CUDA:**
+- `cupy-cuda13x` (>=13.0.0): Biblioteca NumPy-compatible para GPU NVIDIA
+- `numba` (>=0.60.0): JIT compiler para kernels CUDA personalizados
+- `dask[distributed]` (>=2024.0.0): Computación distribuida y paralela
+
+**Procesamiento de Datos Geoespaciales:**
+- `networkx` (>=3.0.0): Análisis y manipulación de grafos
+- `geopandas` (>=0.14.0): Extensión de pandas para datos geoespaciales
+- `pyogrio` (>=0.7.0): Lector optimizado de shapefiles (más rápido que Fiona)
+- `shapely` (>=2.0.0): Manipulación de geometrías espaciales
+- `pyproj` (>=3.6.0): Transformaciones de proyecciones cartográficas
+
+**Utilidades del Sistema:**
+- `psutil` (>=5.9.0): Monitoreo de CPU, RAM, GPU
+- `python-dotenv` (>=1.0.0): Gestión de variables de entorno
+- `heapq` (estándar): Colas de prioridad para Dijkstra
 
 ### 1.4. Métricas de Evaluación
 
@@ -442,7 +493,9 @@ def dijkstra_sparse(graph_csr, source):
 
 ## 6. Referencias
 
-[1] Dijkstra, E. W. (1959). "A note on two problems in connexion with graphs". *Numerische Mathematik*, 1(1), 269-271.
+### Algoritmos y Teoría
+
+[1] Dijkstra, E. W. (1959). "A note on two problems in connexion with graphs". *Numerische Mathematik*, 1(1), 269-271. DOI: 10.1007/BF01386390
 
 [2] Duan, R., et al. (2025). "Parallel Shortest Path Algorithms for Large-Scale Graphs". *Journal of Parallel and Distributed Computing*.
 
@@ -450,9 +503,39 @@ def dijkstra_sparse(graph_csr, source):
 
 [4] Wang, L., et al. (2021). "Graph Partitioning Methods for Distributed Shortest Path Computation". *IEEE Transactions on Parallel and Distributed Systems*.
 
-[5] OpenStreetMap Contributors. (2024). "Planet dump retrieved from https://planet.osm.org". https://www.openstreetmap.org
+[5] Fredman, M. L., & Tarjan, R. E. (1987). "Fibonacci heaps and their uses in improved network optimization algorithms". *Journal of the ACM (JACM)*, 34(3), 596-615.
 
-[6] SciPy Community. (2024). "SciPy Sparse Matrix Library". https://docs.scipy.org/doc/scipy/reference/sparse.html
+### Datos Geoespaciales y Fuentes Oficiales
+
+[6] OpenStreetMap Contributors. (2024). "Planet dump retrieved from https://planet.osm.org". https://www.openstreetmap.org
+
+[7] Ministerio de Transportes y Comunicaciones del Perú (MTC). (2024). "Portal de Datos Abiertos - Red Vial Nacional". https://portal.mtc.gob.pe/estadisticas/datos_abiertos.html
+
+[8] Ministerio de Salud del Perú (MINSA). (2024). "Registro Nacional de Establecimientos de Salud (RENAES)". https://www.datosabiertos.gob.pe/group/salud
+
+[9] GeoMINSA. (2024). "Infraestructura de Datos Espaciales del Ministerio de Salud". Portal de datos geoespaciales del sector salud.
+
+[10] Instituto Nacional de Estadística e Informática (INEI). (2024). "Directorio Nacional de Centros Poblados". https://www.inei.gob.pe
+
+### Librerías y Herramientas
+
+[11] SciPy Community. (2024). "SciPy Sparse Matrix Library". https://docs.scipy.org/doc/scipy/reference/sparse.html
+
+[12] NVIDIA Corporation. (2024). "CuPy: NumPy & SciPy for GPU". https://cupy.dev/
+
+[13] GeoPandas Development Team. (2024). "GeoPandas: Python tools for geographic data". https://geopandas.org/
+
+[14] NetworkX Developers. (2024). "NetworkX: Network Analysis in Python". https://networkx.org/
+
+[15] Ramírez, S., et al. (2024). "FastAPI: Modern, fast web framework for building APIs with Python". https://fastapi.tiangolo.com/
+
+### Metodología y Aplicaciones
+
+[16] Bast, H., et al. (2016). "Route Planning in Transportation Networks". *Algorithm Engineering*, 19-80. Springer.
+
+[17] Delling, D., et al. (2009). "Engineering Route Planning Algorithms". *Algorithmics of Large and Complex Networks*, 117-139. Springer.
+
+[18] Geisberger, R., et al. (2008). "Contraction Hierarchies: Faster and Simpler Hierarchical Routing in Road Networks". *Experimental Algorithms*, 319-333. Springer.
 
 ---
 
@@ -495,33 +578,77 @@ python main.py
 
 ```
 proyecto-algoritmos-avanzados/
-├── area.osm.json              # Grafo de Cusco (1.8M nodos)
+├── area.osm.json              # Grafo de Cusco OSM (1.8M nodos)
+├── .gitignore                 # Configuración Git
+├── README.md                  # Este documento
+│
 ├── backend/
 │   ├── main.py                # API FastAPI (1010 líneas)
 │   ├── graph.py               # UrbanGraph class (534 líneas)
-│   ├── hospitales.py          # Base de datos hospitales
-│   ├── regiones.py            # Regiones del Perú
-│   ├── requirements.txt       # Dependencias
+│   ├── requirements.txt       # Dependencias Python
+│   │
+│   # Datos y configuración
+│   ├── hospitales.py          # Base de datos hospitales estática
+│   ├── hospitales_minsa.py    # Descarga desde MINSA oficial (396 líneas)
+│   ├── regiones.py            # Regiones/provincias/distritos del Perú
+│   ├── descargar_mtc.py       # Descarga red vial MTC (342 líneas)
+│   ├── descargar_cusco.py     # Script descarga OSM Cusco
+│   │
+│   # Algoritmos
 │   └── algorithms/
-│       ├── base.py            # Clase abstracta
-│       ├── dijkstra.py        # Dijkstra + sparse (206 líneas)
-│       ├── duan2025.py        # Duan + fallback CPU (204 líneas)
-│       ├── khanna2022.py      # Khanna + fallback CPU (212 líneas)
-│       └── wang2021.py        # Wang + fallback CPU (248 líneas)
-└── frontend/
-    ├── index.html             # UI interactiva (1678 líneas)
-    └── README.md              # Este documento
+│       ├── __init__.py
+│       ├── base.py            # Clase abstracta ShortestPathAlgorithm
+│       ├── dijkstra.py        # Dijkstra + sparse matrix (206 líneas)
+│       ├── duan2025.py        # Duan et al. 2025 + CPU fallback (204 líneas)
+│       ├── khanna2022.py      # Khanna et al. 2022 + CPU fallback (212 líneas)
+│       ├── wang2021.py        # Wang et al. 2021 + particiones (248 líneas)
+│       └── delta_stepping.py  # Delta-Stepping GPU (experimental)
+│   │
+│   # Mapas y caché
+│   └── mapas/
+│       ├── cusco_hospitales.geojson
+│       ├── cusco_establecimientos.geojson
+│       ├── minsa/             # Datos MINSA descargados
+│       └── mtc/               # Shapefiles MTC descargados
+│
+├── frontend/
+│   ├── index.html             # UI interactiva Leaflet (1678 líneas)
+│   └── README.md
+│
+├── cache/                     # Caché de grafos procesados
+│   └── *.json                 # Archivos de caché por región
+│
+└── venv313/                   # Entorno virtual Python 3.13
+    └── ...                    # Dependencias instaladas
 ```
 
 ### C. API Endpoints
 
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|
-| `/api/system_info` | GET | Info de CPU, RAM, GPU |
-| `/api/download_region` | POST | Carga `area.osm.json` |
-| `/api/calculate_hospital_routes` | POST | Calcula rutas óptimas |
+| `/api` | GET | Información general de la API |
+| `/api/status` | GET | Estado del sistema y grafo cargado |
+| `/api/system_info` | GET | Info detallada CPU, RAM, GPU, CUDA |
+| `/api/regions` | GET | Lista 24 departamentos del Perú |
+| `/api/provincias/{departamento}` | GET | Provincias de un departamento |
+| `/api/distritos/{depto}/{provincia}` | GET | Distritos de una provincia |
+| `/api/hospitales/{departamento}` | GET | Hospitales predefinidos |
+| `/api/hospitales_minsa/{region}` | GET | Hospitales oficiales del MINSA |
+| `/api/download_region` | POST | Descarga mapa OSM de región |
+| `/api/download_mtc` | POST | Carga red vial oficial MTC |
+| `/api/download_distrito` | POST | Descarga distrito específico OSM |
+| `/api/load_graph` | POST | Carga grafo desde JSON local |
+| `/api/geocode` | POST | Convierte dirección a coordenadas |
+| `/api/find_nearest_node` | POST | Nodo más cercano a coordenadas |
 | `/api/find_nearest_hospitals` | POST | Busca hospitales cercanos |
-| `/docs` | GET | Documentación Swagger |
+| `/api/calculate_hospital_routes` | POST | Calcula rutas óptimas a hospitales |
+| `/api/run_algorithm` | POST | Ejecuta un algoritmo específico |
+| `/api/compare_algorithms` | POST | Compara múltiples algoritmos |
+| `/api/graph_info` | GET | Info detallada del grafo cargado |
+| `/api/clear_cache/{region}` | DELETE | Elimina caché de una región |
+| `/api/clear_all_cache` | DELETE | Elimina todo el caché |
+| `/docs` | GET | Documentación Swagger interactiva |
+| `/redoc` | GET | Documentación ReDoc |
 
 ---
 
