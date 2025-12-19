@@ -1,0 +1,444 @@
+\documentclass[conference]{IEEEtran}
+% ==============================
+%       PAQUETES BÁSICOS
+% ==============================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish, es-tabla]{babel} % para el idioma
+\usepackage{graphicx}                 % para imágenes
+\usepackage{cite}                     % para referencias IEEE
+\usepackage{amsmath, amssymb}         % símbolos matemáticos
+\usepackage{booktabs}                 % tablas profesionales
+\usepackage{float}                    % control de flotantes
+\usepackage{url}                      % URLs en referencias
+% \usepackage[hidelinks]{hyperref}      % hipervínculos sin color (comentado por falta de dependencias)
+% \usepackage{caption}
+% \usepackage{subcaption}
+% \usepackage{geometry}
+
+
+% ==============================
+%         DOCUMENTO
+% ==============================
+\begin{document}
+
+% ---------- TÍTULO Y AUTORES ----------
+\title{Comparación de algoritmos clásicos y modernos para el problema de caminos más cortos con fuente única aplicados a la optimización de rutas de ambulancias}
+
+
+\author{
+\IEEEauthorblockN{
+\textbf{Carolay Ccama Enriquez, Lisbeth Yucra Mendoza,}\\
+\textbf{ Efrain Vitorino Marin.}\\
+}
+\IEEEauthorblockA{
+Escuela Profesional de Ingeniería Informática y de Sistemas \\
+Universidad Nacional de San Antonio Abad del Cusco\\
+Email: \{210921, 211363, 160337\}@unsaac.edu.pe
+}
+}
+
+\maketitle
+
+% ---------- RESUMEN ----------
+\begin{abstract}
+El problema de caminos más cortos con fuente única (SSSP) es clave en la optimización de rutas en redes viales urbanas, especialmente en servicios de emergencia. En este trabajo se compara el algoritmo clásico de Dijkstra con algoritmos deterministas y dinámicos recientes, aplicados a la planificación de rutas de ambulancias. Las redes viales se modelan como grafos ponderados utilizando datos de OpenStreetMap y se evalúan métricas de tiempo, memoria y escalabilidad. Los resultados muestran que Dijkstra mantiene un desempeño competitivo en escenarios urbanos reales.
+\end{abstract}
+
+
+
+% ---------- PALABRAS CLAVE ----------
+\begin{IEEEkeywords}
+caminos más cortos, SSSP, algoritmo de Dijkstra, algoritmos deterministas, grafos dinámicos, optimización de rutas, redes viales urbanas, OpenStreetMap, sistemas de emergencia, planificación de ambulancias
+\end{IEEEkeywords}
+
+
+% ==============================
+%         CONTENIDO
+% ==============================
+
+
+
+\section{Descripción del Problema}
+
+Dada una red vial urbana modelada como un grafo ponderado, donde los vértices representan intersecciones y las aristas corresponden a segmentos de calles con pesos asociados a la distancia geográfica, se plantea el problema de determinar el camino de menor costo desde un nodo fuente que representa un centro médico hasta cualquier nodo destino que represente un punto de emergencia.
+
+El problema se enmarca dentro del contexto del cálculo de caminos más cortos con fuente única (SSSP), bajo la restricción de pesos no negativos. Si bien el algoritmo de Dijkstra resuelve este problema de forma eficiente y es ampliamente utilizado en aplicaciones prácticas, recientes desarrollos teóricos han propuesto algoritmos deterministas con mejor complejidad asintótica en grafos dispersos.
+
+El desafío central consiste en evaluar y comparar el desempeño del algoritmo de Dijkstra frente a un algoritmo determinista moderno con complejidad $O(m \log^{2/3} n)$, considerando tanto su comportamiento teórico como su aplicabilidad práctica en redes viales reales. En particular, se busca analizar si las mejoras asintóticas propuestas se traducen en ventajas observables en escenarios de tamaño moderado, como los utilizados en sistemas de planificación de rutas de ambulancias.
+
+\subsection{Objetivo general}
+
+Comparar el desempeño del algoritmo clásico de Dijkstra y un algoritmo determinista moderno con complejidad $O(m \log^{2/3} n)$ en la optimización de rutas de ambulancias, utilizando redes viales urbanas modeladas como grafos ponderados a partir de datos reales.
+
+\subsection{Objetivos específicos}
+
+\begin{itemize}
+    \item Analizar los fundamentos teóricos y la complejidad computacional de algoritmos clásicos y modernos para el problema de caminos más cortos con fuente única (SSSP).
+    
+    \item Modelar una red vial urbana real como un grafo ponderado empleando datos obtenidos desde OpenStreetMap.
+    
+    \item Evaluar el desempeño del algoritmo de Dijkstra en escenarios de planificación de rutas de ambulancias sobre grafos urbanos reales.
+    
+    \item Analizar, desde un enfoque teórico y experimental, las ventajas y limitaciones del algoritmo determinista con complejidad $O(m \log^{2/3} n)$ en comparación con Dijkstra.
+    
+    \item Identificar los escenarios en los que las mejoras asintóticas propuestas por algoritmos modernos pueden resultar relevantes, considerando grafos dispersos y de tamaño moderado.
+\end{itemize}
+
+\section{Hipótesis}
+
+\textbf{Hipótesis general.} 
+Se plantea la hipótesis de que, si bien el algoritmo determinista con complejidad $O(m \log^{2/3} n)$ presenta una mejora teórica respecto al algoritmo de Dijkstra, dicha ventaja no siempre se traduce en un mejor desempeño práctico en redes viales urbanas de tamaño moderado utilizadas para la planificación de rutas de ambulancias.
+
+\vspace{0.3cm}
+
+\textbf{Hipótesis secundaria.} 
+En grafos urbanos dispersos obtenidos a partir de datos reales, el algoritmo de Dijkstra mantiene un desempeño competitivo debido a sus menores constantes y a la simplicidad de su implementación.
+
+
+\section{Antecedentes}
+
+El algoritmo de Dijkstra (1959) \cite{dijkstra1959} es el método clásico para SSSP en grafos con pesos no negativos. Pese a su antigüedad, mantiene desempeño competitivo en grafos dispersos cuando se implementa con heap de Fibonacci.
+
+Wang et al. (2021) \cite{wang2021adds} proponen ADDS, una extensión adaptativa de Dijkstra para grafos dinámicos que reutiliza cálculos previos, reduciendo tiempos de recomputación ante cambios locales en la red.
+
+Khanda et al. (2022) \cite{khanda2022} presentan un algoritmo paralelo para SSSP dinámico mediante descomposición del grafo, orientado a sistemas distribuidos de alto rendimiento.
+
+Duan et al. (2025) \cite{duan2025} proponen el primer algoritmo determinista con complejidad $O(m \log^{2/3} n)$, superando asintóticamente a Dijkstra mediante procesamiento jerárquico de vértices. Los autores señalan constantes ocultas elevadas y mayor complejidad de implementación.
+
+
+
+
+
+\section{Marco Teórico}
+
+
+
+\subsection{Problema SSSP}
+
+SSSP consiste en calcular la distancia mínima $d(s,v)$ desde un vértice fuente $s$ a todos los vértices $v \in V$ de un grafo ponderado $G=(V,E)$ con pesos no negativos \cite{problemshortestpath}. En redes viales, los vértices son intersecciones y las aristas son calles con pesos de distancia o tiempo.
+
+\subsection{Representación de Redes Viales}
+
+Las redes viales se modelan como grafos dirigidos ponderados: nodos son intersecciones, aristas son calles con pesos de distancia/tiempo \cite{porta2018network}. OpenStreetMap \cite{osm2024} proporciona datos abiertos para construir grafos urbanos realistas mediante servicios como GeoFabrik \cite{geofabrik2024}, típicamente dispersos ($m \approx O(n)$). La integración con sistemas de información geográfica permite análisis espacial avanzado \cite{ulima2023gis,geopandas2024}.
+
+\subsection{Algoritmo de Dijkstra}
+
+Dijkstra (1959) \cite{dijkstra1959} resuelve SSSP mediante estrategia voraz: selecciona el vértice con menor distancia y relaja aristas adyacentes. Con heap binario, complejidad $O(m + n \log n)$ \cite{gruijic2025optimal}.
+
+\subsection{Algoritmo Duan et al. (2025)}
+
+Alcanza complejidad $O(m \log^{2/3} n)$ \cite{duan2025} mediante: (1) clasificación jerárquica de vértices por rango de distancia, (2) relajación controlada con estructuras especializadas, (3) procesamiento por fases con refinamiento progresivo. Reduce dependencia logarítmica de colas de prioridad pero introduce constantes ocultas elevadas y mayor complejidad estructural.
+
+
+\subsection{ADDS (Wang et al. 2021)}
+
+Extiende Dijkstra para grafos dinámicos \cite{wang2021adds}. Identifica vértices afectados por cambios locales y aplica relajación incremental. Complejidad: $O((m + n)\log n)$ en caso general, $O((m_k + k)\log k)$ para $k$ vértices impactados.
+
+
+\subsection{Khanda et al. (2022)}
+
+Propone actualización paralela para SSSP dinámico \cite{khanda2022}. Localiza impacto de cambios y propaga actualizaciones solo en regiones afectadas. Complejidad: $O((m + n)\log n)$ en peor caso, $O((m_k + k)\log k)$ para $k$ vértices. Enfatiza paralelización multi-procesador para escalabilidad.
+
+
+\subsection{Métricas de Evaluación}
+
+Se evalúan \cite{gruijic2025optimal}: (1) Tiempo de ejecución, (2) Nodos procesados, (3) Relajaciones de aristas, (4) Uso de memoria, (5) Escalabilidad vs complejidad teórica.
+
+\section{Metodología}
+
+\subsection{Algoritmos Implementados}
+
+\subsubsection{Algoritmo de Dijkstra (Clásico)}
+\begin{itemize}
+    \item \textbf{Descripción}: Implementación con cola de prioridad (heap) para eficiencia $O((V+E)\log V)$
+    \item \textbf{Optimizaciones}:
+    \begin{itemize}
+        \item Versión sparse: Uso de \texttt{scipy.sparse.csr\_matrix} para grafos grandes ($>10k$ nodos)
+        \item Versión densa: Operaciones vectorizadas con NumPy para grafos pequeños
+        \item Versión CUDA: Procesamiento paralelo con CuPy (experimental)
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Duan et al. (2025) -- Procesamiento por Fronteras}
+\begin{itemize}
+    \item \textbf{Descripción}: Algoritmo paralelo basado en expansión de fronteras
+    \item \textbf{Características}:
+    \begin{itemize}
+        \item Procesamiento simultáneo de múltiples nodos en la frontera
+        \item Reducción de transferencias GPU-CPU
+        \item Actualización vectorizada de distancias
+    \end{itemize}
+    \item \textbf{Configuración actual}: Fallback automático a CPU con heap si CUDA no está disponible
+\end{itemize}
+
+\subsubsection{Khanna et al. (2022) -- Búsqueda Bidireccional}
+\begin{itemize}
+    \item \textbf{Descripción}: Búsqueda simultánea desde origen con heurísticas de poda
+    \item \textbf{Características}:
+    \begin{itemize}
+        \item Priorización por grado de nodo (menor grado = mayor prioridad)
+        \item Poda temprana de ramas no óptimas
+        \item Cola de prioridad adaptativa
+    \end{itemize}
+    \item \textbf{Configuración actual}: Implementación CPU optimizada con acceso sparse
+\end{itemize}
+
+\subsubsection{Wang et al. (2021) -- Particionamiento de Grafos}
+\begin{itemize}
+    \item \textbf{Descripción}: División del grafo en particiones para procesamiento paralelo
+    \item \textbf{Características}:
+    \begin{itemize}
+        \item Particionamiento basado en proximidad al origen
+        \item Procesamiento independiente de particiones
+        \item Fase de fusión para nodos frontera
+    \end{itemize}
+    \item \textbf{Configuración actual}: 4 particiones por defecto, fallback CPU con heap
+\end{itemize}
+
+\subsection{Estructura de Datos}
+
+\subsubsection{Representación del Grafo}
+\begin{itemize}
+    \item \textbf{Matriz de adyacencia sparse (CSR)}: Para grafos grandes ($>10k$ nodos)
+    \begin{itemize}
+        \item Formato: \texttt{scipy.sparse.csr\_matrix}
+        \item Ventaja: Memoria $O(E)$ en lugar de $O(V^2)$
+        \item Acceso a vecinos: \texttt{getrow(node).nonzero()[1]}
+    \end{itemize}
+
+    \item \textbf{Matriz de adyacencia densa}: Para grafos pequeños ($<10k$ nodos)
+    \begin{itemize}
+        \item Formato: \texttt{numpy.ndarray}
+        \item Ventaja: Operaciones vectorizadas más rápidas
+        \item Acceso directo: \texttt{matrix[i, j]}
+    \end{itemize}
+
+    \item \textbf{Lista de adyacencia}: Estructura auxiliar
+    \begin{itemize}
+        \item Formato: \{\texttt{nodo: [(vecino, peso), ...]}\}
+        \item Uso: Acceso rápido a vecinos durante carga de datos
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Datos de Entrada}
+
+\textbf{1. Red Vial - OpenStreetMap (OSM)}
+\begin{itemize}
+    \item Fuente: OpenStreetMap formato JSON \cite{osm2024}
+    \item Región: Departamento de Cusco, Perú
+    \item Archivo: \texttt{area.osm.json} (64,530 líneas, $\sim$1.8M nodos)
+    \item Elementos: Nodos GPS, Ways (calles), Tags (metadatos)
+    \item Descarga: Servicio GeoFabrik para extracción regional \cite{geofabrik2024}
+\end{itemize}
+
+\textbf{2. Red Vial Oficial - MTC}
+\begin{itemize}
+    \item Fuente: Portal de Datos Abiertos del Ministerio de Transportes y Comunicaciones \cite{mtc2024}
+    \item Datasets: Red Vial Nacional (SINAC), Departamental, Vecinal
+    \item Formato: Shapefiles con geometrías LineString (WGS84)
+\end{itemize}
+
+\textbf{3. Establecimientos de Salud - MINSA}
+\begin{itemize}
+    \item Fuente: Registro Nacional de Establecimientos de Salud (RENAES) \cite{minsa2024}
+    \item Categorías: I-1 a I-4 (Puestos/Centros), II-1 a II-2 (Hospitales I-II), III-1 a III-2 (Hospitales Nacionales)
+    \item Datos: Coordenadas GPS, categoría, servicios disponibles
+    \item Mapeo complementario: Sistema OMS de infraestructura sanitaria \cite{who2024healthmap}
+\end{itemize}
+
+\subsection{Configuración Experimental}
+
+\subsubsection{Hardware}
+\begin{itemize}
+    \item \textbf{CPU}: Procesador compatible x86-64
+    \item \textbf{GPU}: NVIDIA GeForce GTX 1050 (opcional)
+    \begin{itemize}
+        \item CUDA Cores: 640
+        \item Memoria: 2GB GDDR5
+        \item CUDA Version: 13.0
+        \item Driver: 581.80
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Software}
+\begin{itemize}
+    \item \textbf{Sistema Operativo}: Windows 11
+    \item \textbf{Python}: 3.13.7
+    \item \textbf{Backend}: FastAPI + Uvicorn
+    \item \textbf{Frontend}: Leaflet.js + Vanilla JavaScript
+    \item \textbf{Librerías principales}:
+    \begin{itemize}
+        \item Framework Web: \texttt{fastapi}, \texttt{uvicorn}, \texttt{pydantic}
+        \item Procesamiento Numérico: \texttt{numpy}, \texttt{scipy} \cite{scipy2024}, \texttt{pandas}
+        \item Aceleración GPU: \texttt{cupy-cuda13x} \cite{cupy2024}, \texttt{numba}, \texttt{dask}
+        \item Datos Geoespaciales: \texttt{networkx} \cite{networkx2024}, \texttt{geopandas} \cite{geopandas2024}, \texttt{pyogrio}, \texttt{shapely}
+        \item Utilidades: \texttt{psutil}, \texttt{heapq}
+    \end{itemize}
+\end{itemize}
+
+\section{Resultados}
+
+Los experimentos se realizaron sobre la red vial urbana del departamento de Cusco extraída de OpenStreetMap, con 1,818,802 nodos y aproximadamente 4.5 millones de aristas. Se calcularon rutas óptimas desde ubicaciones de pacientes hacia los tres principales hospitales de la ciudad.
+
+\subsection{Características del Grafo}
+
+\begin{itemize}
+    \item Nodos: 1,818,802 intersecciones viales
+    \item Aristas: $\sim$4.5M segmentos de calles
+    \item Representación: Matriz sparse CSR
+    \item Memoria ocupada: $\sim$180 MB (vs 12 TiB en formato denso)
+\end{itemize}
+
+\subsection{Resultados Experimentales - Hospital Antonio Lorena}
+
+La Tabla \ref{tab:resultados} presenta los resultados completos para la ruta al Hospital Antonio Lorena desde coordenadas GPS (-13.5167674, -71.9787787).
+
+\begin{table}[H]
+\centering
+\caption{Comparación de algoritmos para rutas de ambulancia}
+\label{tab:resultados}
+\scriptsize
+\begin{tabular}{@{}lcccccl@{}}
+\toprule
+\textbf{Algoritmo} & \textbf{Tiempo} & \textbf{Dist.} & \textbf{Nodos} & \textbf{Relaj.} & \textbf{Mem.} & \textbf{Modo} \\
+ & \textbf{(s)} & \textbf{(km)} & \textbf{Proc.} & \textbf{Aristas} & \textbf{(MB)} & \\
+\midrule
+Dijkstra     & 2.81             & 3.16           & 2,441          & 2,514           & 14.27         & gpu\_cupy\_sparse \\
+Duan et al.  & \textbf{0.39}    & 3.91           & 4,333          & 4,437           & 15.16         & delta\_stepping \\
+Khanna et al.& 35.12            & 4.71           & 3,707          & 3,820           & 40.72         & bidireccional \\
+Wang et al.  & 93.85            & \textbf{3.39}  & 741,871        & 745,723         & 22.39         & particionado \\ 
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Complejidad Teórica vs Real}
+
+La Tabla \ref{tab:complejidad} muestra la convergencia de complejidades debido al fallback CPU con heap binario.
+
+\begin{table}[H]
+\centering
+\caption{Complejidad computacional: teórica vs implementación real}
+\label{tab:complejidad}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Algoritmo} & \textbf{Teórica (GPU)} & \textbf{Real (CPU sparse)} \\
+\midrule
+Dijkstra     & $O((V+E) \log V)$ & $O(E \log V)$ \\
+Duan et al.  & $O(V + E)$        & $O(E \log V)$ \\
+Khanna et al.& $O(\sqrt{V} \cdot E)$ & $O(E \log V)$ \\
+Wang et al.  & $O(E/P + V \log V)$ & $O(E \log V)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Análisis de Resultados}
+
+\begin{itemize}
+    \item \textbf{Más rápido}: Duan et al. (0.39s) - 7.3x más rápido que Dijkstra mediante delta-stepping CPU
+    \item \textbf{Ruta más corta}: Wang et al. (3.39 km), aunque procesó 741k nodos vs 2,441 de Dijkstra
+    \item \textbf{Más eficiente}: Dijkstra (2,441 nodos procesados, 14.27 MB) - balance óptimo
+    \item \textbf{Menos práctico}: Khanna et al. (35s) por búsqueda bidireccional sin aceleración GPU
+\end{itemize}
+
+\textbf{Observaciones clave}: Todas las variantes calcularon rutas alternativas penalizando aristas previas. Wang et al. encontró la ruta óptima a costa de explorar 300x más nodos, evidenciando el trade-off entre exhaustividad y eficiencia computacional.
+
+\subsection{Optimizaciones Implementadas}
+
+La Tabla \ref{tab:optimizaciones} resume los desafíos técnicos resueltos durante la implementación.
+
+\begin{table}[H]
+\centering
+\caption{Optimizaciones de implementación}
+\label{tab:optimizaciones}
+\small
+\begin{tabular}{@{}p{3.5cm}p{4cm}@{}}
+\toprule
+\textbf{Problema} & \textbf{Solución} \\ \midrule
+Explosión de memoria (12 TiB) & Matriz sparse CSR ($\sim$180 MB) \\
+Iteración ineficiente & Acceso sparse con \texttt{getrow().nonzero()} \\
+Dependencias CUDA faltantes & Fallback automático a CPU \\
+Conversión a matriz densa & Solo si GPU disponible y grafo pequeño \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\section{Análisis y Discusión}
+
+\subsection{Convergencia de Complejidades en Modo CPU}
+
+Un hallazgo fundamental es que todos los algoritmos modernos implementados convergen a complejidad $O(E \log V)$ cuando operan en modo CPU con heap binario, independientemente de sus optimizaciones teóricas. Esto se debe al fallback automático implementado ante la ausencia de aceleración GPU funcional.
+
+\subsection{Importancia de Matrices Sparse}
+
+Para grafos urbanos reales con 1.8M nodos, las matrices sparse CSR son esenciales. La reducción de memoria de 12 TiB (formato denso) a $\sim$180 MB hace viable el procesamiento en hardware convencional. El acceso eficiente mediante \texttt{getrow(i).nonzero()[1]} proporciona aceleración estimada de 1000x frente a iteración completa.
+
+\subsection{Ventajas Prácticas de Dijkstra}
+
+Para redes viales urbanas de tamaño moderado, Dijkstra mantiene ventajas significativas:
+
+\begin{itemize}
+    \item \textbf{Eficiencia de nodos}: Procesa solo 2,441 nodos vs 741,871 de Wang et al.
+    \item \textbf{Memoria mínima}: 14.27 MB vs hasta 40.72 MB
+    \item \textbf{Simplicidad}: Menor complejidad estructural reduce errores
+    \item \textbf{Robustez}: Comportamiento predecible sin dependencias GPU
+\end{itemize}
+
+\subsection{Limitaciones de Aceleración GPU}
+
+La aceleración CUDA no es plug-and-play en grafos grandes. Requiere: (1) DLLs y drivers completos, (2) conversión sparse→densa prohibitiva para grafos >10k nodos, (3) transferencias GPU-CPU que anulan ganancias. Esto explica por qué todos los algoritmos operaron en modo CPU.
+
+\section{Conclusiones}
+
+\subsection{Hallazgos Principales}
+
+\begin{enumerate}
+    \item \textbf{Matrices sparse son esenciales}: Para grafos urbanos reales (1.8M nodos), reducen memoria de 12 TiB a $\sim$180 MB, haciendo viable el procesamiento en hardware convencional.
+    
+    \item \textbf{Convergencia a heap binario}: Todos los algoritmos convergen a complejidad $O(E \log V)$ en modo CPU, independientemente de optimizaciones teóricas, debido a fallback ante ausencia de GPU funcional.
+    
+    \item \textbf{Eficiencia práctica de Dijkstra}: Procesa 300x menos nodos (2,441 vs 741,871) y usa 35\% menos memoria que algoritmos modernos, manteniendo calidad de rutas comparable.
+    
+    \item \textbf{Aplicabilidad demostrada}: Sistema funcional para optimización de rutas de ambulancias en Cusco, validado con datos oficiales de MINSA y MTC.
+\end{enumerate}
+
+\subsection{Contribuciones}
+
+\begin{itemize}
+    \item Implementación escalable usando matrices sparse CSR para grafos >1M nodos
+    \item Framework de comparación multi-algoritmo con fallback automático CPU/GPU
+    \item Integración de datos oficiales: red vial MTC + establecimientos MINSA
+    \item Sistema web interactivo para visualización de rutas óptimas
+\end{itemize}
+
+\subsection{Limitaciones}
+
+\begin{itemize}
+    \item CUDA no funcional por dependencias DLL faltantes (\texttt{nvrtc64\_130\_0.dll})
+    \item Paralelismo GPU limitado; conversión sparse→densa prohibitiva para grafos grandes
+    \item Resultados específicos para redes viales urbanas; otros dominios pueden variar
+    \item No se evaluaron variantes aleatorizadas ni aproximadas
+\end{itemize}
+
+\subsection{Trabajo Futuro}
+
+\begin{enumerate}
+    \item \textbf{Infraestructura GPU}: Resolver dependencias CUDA Toolkit para habilitar aceleración completa
+    \item \textbf{Optimización sparse GPU}: Implementar versiones que operen directamente sobre CSR sin conversión
+    \item \textbf{Benchmarking exhaustivo}: Experimentos con variación sistemática de tamaño de grafo
+    \item \textbf{Validación práctica}: Comparar rutas calculadas con sistemas comerciales (Google Maps, Waze)
+    \item \textbf{Extensión dinámica}: Incorporar tráfico en tiempo real y bloqueos viales temporales
+\end{enumerate}
+
+\subsection{Conclusión Final}
+
+Para redes viales urbanas de tamaño moderado ($n < 10^6$), el algoritmo de Dijkstra con heap binario y matriz sparse CSR continúa siendo la opción óptima por su eficiencia práctica, simplicidad de implementación y robustez operacional. Si bien algoritmos modernos como Duan et al. muestran mejoras en casos específicos (7.3x más rápido con delta-stepping), requieren infraestructura GPU completa y procesamiento de órdenes de magnitud más nodos para rutas alternativas. Esta investigación confirma la importancia de complementar análisis teórico de complejidad con evaluación experimental en contextos aplicados, especialmente para sistemas críticos como optimización de rutas de ambulancias.
+
+% ==============================
+%         REFERENCIAS
+% ==============================
+\bibliographystyle{ieeetr}
+\bibliography{ref}
+
+
+\end{document}

@@ -1,0 +1,74 @@
+\begin{thebibliography}{10}
+
+\bibitem{dijkstra1959}
+E.~W. Dijkstra, ``A note on two problems in connexion with graphs,'' {\em
+  Numerische Mathematik}, vol.~1, pp.~269--271, 1959.
+
+\bibitem{wang2021adds}
+X.~Wang {\em et~al.}, ``Adds: An adaptive dynamic dijkstra strategy for
+  shortest path computation,'' {\em IEEE Access}, 2021.
+
+\bibitem{khanda2022}
+M.~Khanda {\em et~al.}, ``A parallel algorithm template for updating
+  single-source shortest paths in large-scale dynamic networks,'' {\em IEEE
+  Transactions on Parallel and Distributed Systems}, 2022.
+
+\bibitem{duan2025}
+R.~Duan {\em et~al.}, ``Breaking the sorting barrier for directed single-source
+  shortest paths,'' {\em arXiv preprint arXiv:2504.17033}, 2025.
+
+\bibitem{problemshortestpath}
+T.~H. Cormen, C.~E. Leiserson, R.~L. Rivest, and C.~Stein, {\em Introduction to
+  Algorithms}.
+\newblock MIT Press, 4th~ed., 2022.
+
+\bibitem{porta2018network}
+S.~Porta, M.~Barthelemy, {\em et~al.}, ``Street network studies: from networks
+  to models and their representations,'' {\em Networks and Spatial Economics},
+  vol.~18, no.~3, pp.~735--749, 2018.
+
+\bibitem{osm2024}
+{OpenStreetMap Contributors}, ``Planet dump retrieved from
+  https://planet.osm.org,'' 2024.
+
+\bibitem{geofabrik2024}
+{Geofabrik GmbH}, ``Openstreetmap data extracts - peru,'' 2024.
+\newblock Descarga automática de datos geoespaciales de Perú.
+
+\bibitem{ulima2023gis}
+Varios, ``Aplicaciones de sistemas de información geográfica en salud
+  pública,'' {\em Revista del Instituto de Investigación de la Facultad de
+  Ingeniería Industrial y de Sistemas}, 2023.
+
+\bibitem{geopandas2024}
+{GeoPandas Development Team}, ``Geopandas: Python tools for geographic data,''
+  2024.
+
+\bibitem{gruijic2025optimal}
+�.~Grujić and B.~Grujić, ``Optimal routing in urban road networks using
+  graph-based algorithms,'' {\em Applied Sciences}, vol.~15, no.~8, p.~4162,
+  2025.
+
+\bibitem{mtc2024}
+{Ministerio de Transportes y Comunicaciones del Perú}, ``Portal de datos
+  abiertos - red vial nacional,'' 2024.
+
+\bibitem{minsa2024}
+{Ministerio de Salud del Perú}, ``Registro nacional de establecimientos de
+  salud (renaes),'' 2024.
+
+\bibitem{who2024healthmap}
+{World Health Organization}, ``Who global health observatory - interactive
+  maps,'' 2024.
+\newblock Sistema de mapeo de infraestructura de salud global.
+
+\bibitem{scipy2024}
+{SciPy Community}, ``Scipy sparse matrix library,'' 2024.
+
+\bibitem{cupy2024}
+{NVIDIA Corporation}, ``Cupy: Numpy \& scipy for gpu,'' 2024.
+
+\bibitem{networkx2024}
+{NetworkX Developers}, ``Networkx: Network analysis in python,'' 2024.
+
+\end{thebibliography}
