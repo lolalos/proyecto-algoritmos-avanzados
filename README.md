@@ -8,6 +8,11 @@ Email: {210921, 211363, 160337}@unsaac.edu.pe
 
 ---
 
+![Interfaz del Sistema - Comparación de Algoritmos de Rutas a Hospitales](caminos%20cortos%20ambulancias.png)
+*Sistema web interactivo mostrando rutas óptimas a hospitales en Cusco calculadas con 4 algoritmos diferentes sobre un grafo de 1.8M nodos*
+
+---
+
 ## Resumen
 
 Este proyecto implementa y compara cuatro algoritmos de caminos más cortos con fuente única (Single-Source Shortest Path - SSSP) aplicados a la optimización de rutas de ambulancias en redes viales urbanas del departamento de Cusco, Perú. Se evalúa el rendimiento de algoritmos clásicos (Dijkstra) y modernos (Duan et al. 2025, Khanna et al. 2022, Wang et al. 2021) en dos configuraciones: CPU y GPU (CUDA), utilizando grafos reales extraídos de OpenStreetMap con hasta 1.8 millones de nodos.
@@ -213,16 +218,26 @@ Este proyecto implementa y compara cuatro algoritmos de caminos más cortos con 
 - **Tipo de matriz**: Sparse CSR
 - **Memoria ocupada**: ~180 MB (vs 12 TiB si fuera densa)
 
-#### Ejemplo de Resultados (Hospital Antonio Lorena)
+#### Resultados Completos (Hospital Antonio Lorena)
 
-| Algoritmo | Tiempo (s) | Nodos Proc. | Relax. Aristas | Memoria (MB) | Distancia (km) |
-|-----------|------------|-------------|----------------|--------------|----------------|
-| Dijkstra  | 8.097      | 2           | ~10            | 2.34         | 0.02           |
-| Duan2025  | *          | *           | *              | *            | *              |
-| Khanna2022| *          | *           | *              | *            | *              |
-| Wang2021  | *          | *           | *              | *            | *              |
+| Algoritmo | Estado | Distancia (km) | Tiempo (s) | Nodos Proc. | Relax. Aristas | Memoria (MB) | Modo | Variante |
+|-----------|--------|----------------|------------|-------------|----------------|--------------|------|----------|
+| Dijkstra  | ✅ OK  | 3.159          | 2.8086     | 2,441       | 2,514          | 14.27        | gpu_cupy_sparse | baseline |
+| Duan2025  | ✅ OK  | 3.905          | 0.3860     | 4,333       | 4,437          | 15.16        | cpu_delta_stepping | avoid_prev_edges |
+| Khanna2022| ✅ OK  | 4.714          | 35.1161    | 3,707       | 3,820          | 40.72        | N/A | avoid_prev_edges |
+| Wang2021  | ✅ OK  | 3.391          | 93.8491    | 741,871     | 745,723        | 22.39        | partition_scheduler | avoid_prev_edges |
 
-**\* En ejecución** (optimización de acceso sparse implementada)
+**Análisis de Resultados:**
+- **Más rápido**: Duan2025 (0.39s) - 7.3x más rápido que Dijkstra
+- **Ruta más corta**: Wang2021 (3.39 km) - aunque procesó 741k nodos
+- **Más eficiente en nodos**: Dijkstra (2,441 nodos procesados)
+- **Menor memoria**: Dijkstra (14.27 MB)
+
+**Observaciones:**
+1. Duan2025 logró excelente rendimiento con delta-stepping en CPU
+2. Wang2021 encontró mejor ruta pero a costa de procesar 300x más nodos
+3. Khanna2022 fue el más lento (35s) debido a búsqueda bidireccional sin GPU
+4. Todas las variantes `avoid_prev_edges` calculan rutas alternativas penalizando aristas previas
 
 ### 2.4. Desafíos y Soluciones Implementadas
 
