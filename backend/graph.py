@@ -31,6 +31,16 @@ except ImportError:
     ox = None
     nx = None
 
+# Importar módulos de datos oficiales
+try:
+    from descargar_mtc import MTCDataDownloader
+    from hospitales_minsa import MINSADataDownloader
+    MTC_MINSA_AVAILABLE = True
+except ImportError:
+    MTC_MINSA_AVAILABLE = False
+    MTCDataDownloader = None
+    MINSADataDownloader = None
+
 
 class UrbanGraph:
     """Representa un grafo de red vial urbana."""
@@ -283,7 +293,7 @@ class UrbanGraph:
             return False
     
     def _process_networkx_graph(self, G):
-        """Procesa un grafo de NetworkX a matriz de adyacencia."""
+        """Procesa un grafo de NetworkX a matriz de adyacencia (dispersa para grafos grandes)."""
         # Obtener lista de nodos
         nodes = list(G.nodes())
         self.num_nodes = len(nodes)
@@ -293,27 +303,55 @@ class UrbanGraph:
             self.node_mapping[idx] = node_id
             self.reverse_mapping[node_id] = idx
             
-            # Obtener coordenadas
+            # Obtener coordenadas (soportar ambos formatos: OSM y MTC)
             node_data = G.nodes[node_id]
-            self.node_coordinates[idx] = (
-                node_data.get('y', 0.0),  # latitud
-                node_data.get('x', 0.0)   # longitud
-            )
+            # OSM usa 'y','x' | MTC usa 'lat','lon'
+            lat = node_data.get('y', node_data.get('lat', 0.0))
+            lon = node_data.get('x', node_data.get('lon', 0.0))
+            self.node_coordinates[idx] = (lat, lon)
         
-        # Crear matriz de adyacencia
-        self.adjacency_matrix = np.zeros((self.num_nodes, self.num_nodes), dtype=np.float32)
+        # DECISIÓN: usar matriz dispersa si el grafo es grande (>10k nodos)
+        use_sparse = self.num_nodes > 10000
         
-        # Llenar con aristas
-        for u, v, data in G.edges(data=True):
-            u_idx = self.reverse_mapping[u]
-            v_idx = self.reverse_mapping[v]
+        if use_sparse:
+            print(f"📊 Creando matriz dispersa para {self.num_nodes:,} nodos...")
+            # Usar matriz dispersa (lil_matrix para construcción eficiente)
+            self.adjacency_matrix = sparse.lil_matrix((self.num_nodes, self.num_nodes), dtype=np.float32)
+            self.adjacency_list = {i: [] for i in range(self.num_nodes)}
             
-            # Usar la longitud de la arista si está disponible
-            length = data.get('length', 1.0)
+            # Llenar con aristas
+            for u, v, data in G.edges(data=True):
+                u_idx = self.reverse_mapping[u]
+                v_idx = self.reverse_mapping[v]
+                
+                # Usar la longitud de la arista si está disponible
+                length = data.get('length', 1.0)
+                
+                self.adjacency_matrix[u_idx, v_idx] = length
+                self.adjacency_list[u_idx].append((v_idx, length))
+                self.edge_lengths[(u_idx, v_idx)] = length
+                self.num_edges += 1
             
-            self.adjacency_matrix[u_idx, v_idx] = length
-            self.edge_lengths[(u_idx, v_idx)] = length
-            self.num_edges += 1
+            # Convertir a CSR (Compressed Sparse Row) para operaciones rápidas
+            print(f"🔄 Convirtiendo a formato CSR...")
+            self.adjacency_matrix = self.adjacency_matrix.tocsr()
+            print(f"💾 Memoria de matriz dispersa: ~{self.adjacency_matrix.data.nbytes / 1024 / 1024:.2f} MB")
+        else:
+            # Matriz densa para grafos pequeños
+            print(f"📊 Creando matriz densa para {self.num_nodes:,} nodos...")
+            self.adjacency_matrix = np.zeros((self.num_nodes, self.num_nodes), dtype=np.float32)
+            
+            # Llenar con aristas
+            for u, v, data in G.edges(data=True):
+                u_idx = self.reverse_mapping[u]
+                v_idx = self.reverse_mapping[v]
+                
+                # Usar la longitud de la arista si está disponible
+                length = data.get('length', 1.0)
+                
+                self.adjacency_matrix[u_idx, v_idx] = length
+                self.edge_lengths[(u_idx, v_idx)] = length
+                self.num_edges += 1
     
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """
@@ -348,6 +386,20 @@ class UrbanGraph:
         """Retorna la lista de adyacencia del grafo."""
         return self.adjacency_list
     
+    def get_edge_weight(self, from_node: int, to_node: int) -> float:
+        """Retorna el peso de una arista entre dos nodos."""
+        # Primero intentar desde edge_lengths
+        if (from_node, to_node) in self.edge_lengths:
+            return self.edge_lengths[(from_node, to_node)]
+        
+        # Si no, buscar en la matriz de adyacencia
+        if sparse.issparse(self.adjacency_matrix):
+            # Para matriz dispersa
+            return self.adjacency_matrix[from_node, to_node]
+        else:
+            # Para matriz densa
+            return self.adjacency_matrix[from_node, to_node]
+    
     def get_node_info(self, node_idx: int) -> Dict:
         """Obtiene información de un nodo por su índice."""
         if node_idx not in self.node_mapping:
@@ -362,17 +414,69 @@ class UrbanGraph:
         }
     
     def find_nearest_node(self, lat: float, lon: float) -> int:
-        """Encuentra el nodo más cercano a una coordenada."""
+        """Encuentra el nodo más cercano a una coordenada usando búsqueda optimizada."""
+        if not self.node_coordinates:
+            print("⚠️ No hay nodos cargados en el grafo")
+            return 0
+        
         min_dist = float('inf')
         nearest_idx = 0
         
-        for idx in range(self.num_nodes):
-            node_lat, node_lon = self.node_coordinates[idx]
+        # Búsqueda optimizada con filtro espacial más agresivo
+        # Para grafos grandes (>100k nodos), usar muestreo
+        coords_items = list(self.node_coordinates.items())
+        
+        # Si el grafo es muy grande, primero filtrar por bbox
+        if len(coords_items) > 100000:
+            # Filtro agresivo: bbox de 0.05 grados (~5.5km)
+            filtered = [
+                (idx, nlat, nlon) 
+                for idx, (nlat, nlon) in coords_items
+                if abs(nlat - lat) < 0.05 and abs(nlon - lon) < 0.05
+            ]
+            
+            if not filtered:
+                # Si no hay nodos cercanos, ampliar búsqueda
+                filtered = [
+                    (idx, nlat, nlon) 
+                    for idx, (nlat, nlon) in coords_items
+                    if abs(nlat - lat) < 0.2 and abs(nlon - lon) < 0.2
+                ]
+            
+            print(f"🔍 Buscando en {len(filtered):,} nodos filtrados de {len(coords_items):,}")
+        else:
+            # Filtro estándar para grafos pequeños
+            filtered = [
+                (idx, nlat, nlon) 
+                for idx, (nlat, nlon) in coords_items
+                if abs(nlat - lat) < 0.1 and abs(nlon - lon) < 0.1
+            ]
+        
+        # Buscar el más cercano en los nodos filtrados
+        for idx, node_lat, node_lon in filtered:
             dist = self._haversine_distance(lat, lon, node_lat, node_lon)
             
             if dist < min_dist:
                 min_dist = dist
                 nearest_idx = idx
+        
+        # Si no encontramos nada en el filtro, buscar en todos
+        if min_dist == float('inf'):
+            print(f"⚠️ No se encontraron nodos cercanos, buscando en todo el grafo...")
+            for idx, (node_lat, node_lon) in coords_items[:10000]:  # Limitar a primeros 10k
+                dist = self._haversine_distance(lat, lon, node_lat, node_lon)
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest_idx = idx
+        
+        # Validar resultado
+        if min_dist > 10000:  # > 10km es sospechoso
+            print(f"⚠️ Nodo más cercano está a {min_dist/1000:.1f} km")
+            print(f"   Buscado: ({lat:.6f}, {lon:.6f})")
+            if nearest_idx in self.node_coordinates:
+                print(f"   Encontrado en nodo {nearest_idx}: {self.node_coordinates[nearest_idx]}")
+        elif min_dist < 1000:  # < 1km está bien
+            print(f"✅ Nodo encontrado a {min_dist:.0f} metros")
         
         return nearest_idx
     
@@ -478,6 +582,167 @@ class UrbanGraph:
             if os.path.exists(filepath):
                 os.remove(filepath)
             return False
+    
+    def load_from_mtc(self, region_key: str = 'cusco', incluir_vecinal: bool = True) -> bool:
+        """
+        Carga red vial oficial del MTC para una región.
+        Usa caché si existe, sino descarga.
+        
+        Args:
+            region_key: Región a cargar (ej: 'cusco')
+            incluir_vecinal: Si incluir caminos vecinales
+            
+        Returns:
+            True si la carga fue exitosa
+        """
+        try:
+            # Verificar si existe el grafo procesado en caché
+            cache_dir = os.path.join(os.path.dirname(__file__), 'mapas')
+            pkl_file = os.path.join(cache_dir, f'{region_key}_mtc_graph.pkl')
+            pkl_urban_file = os.path.join(cache_dir, f'{region_key}_mtc_urban.pkl')
+            
+            # Intentar cargar versión urbana (componente conectado principal)
+            if os.path.exists(pkl_urban_file):
+                print(f"📦 Cargando red vial URBANA desde caché: {pkl_urban_file}")
+                print(f"⏳ Cargando grafo urbano conectado...")
+                
+                import pickle
+                import time
+                start = time.time()
+                
+                with open(pkl_urban_file, 'rb') as f:
+                    G = pickle.load(f)
+                
+                print(f"✅ Grafo urbano cargado en {time.time() - start:.1f}s")
+                print(f"🔄 Procesando matriz dispersa...")
+                
+                self.graph = G
+                self._process_networkx_graph(G)
+                
+                print(f"✅ Red vial URBANA lista: {self.num_nodes:,} nodos, {self.num_edges:,} aristas")
+                return True
+            
+            # Si no existe urbano, cargar completo y extraer componente principal
+            if os.path.exists(pkl_file):
+                print(f"📦 Cargando red vial MTC completa desde caché: {pkl_file}")
+                print(f"⏳ Esto puede tardar 10-15 segundos para grafo grande...")
+                
+                import pickle
+                import networkx as nx
+                import time
+                start = time.time()
+                
+                with open(pkl_file, 'rb') as f:
+                    G_full = pickle.load(f)
+                
+                print(f"✅ Grafo completo cargado en {time.time() - start:.1f}s")
+                print(f"🔍 Extrayendo componente conectado principal (zona urbana)...")
+                
+                # Extraer el componente conexo más grande
+                if G_full.is_directed():
+                    # Para grafos dirigidos, usar componente débilmente conectado
+                    components = list(nx.weakly_connected_components(G_full))
+                else:
+                    components = list(nx.connected_components(G_full))
+                
+                # Obtener el componente más grande
+                largest_component = max(components, key=len)
+                G = G_full.subgraph(largest_component).copy()
+                
+                print(f"✅ Componente principal: {len(G.nodes):,} nodos ({len(G.nodes)/len(G_full.nodes)*100:.1f}% del total)")
+                print(f"💾 Guardando versión urbana para próximas cargas...")
+                
+                with open(pkl_urban_file, 'wb') as f:
+                    pickle.dump(G, f)
+                
+                self.graph = G
+                self._process_networkx_graph(G)
+                
+                print(f"✅ Red vial URBANA lista: {self.num_nodes:,} nodos, {self.num_edges:,} aristas")
+                return True
+            
+            # Si no existe en caché, intentar descargar
+            if not MTC_MINSA_AVAILABLE:
+                print("❌ Módulos MTC no disponibles y no hay caché")
+                print("💡 Ejecuta primero: python descargar_mtc.py")
+                return False
+            
+            print(f"🏛️  Descargando red vial oficial del MTC para {region_key}...")
+            
+            downloader = MTCDataDownloader()
+            
+            # Descargar red vial
+            gdf = downloader.download_red_vial_cusco(
+                incluir_vecinal=incluir_vecinal,
+                cache=True
+            )
+            
+            if gdf is None:
+                return False
+            
+            # Convertir a grafo NetworkX
+            G, metadata = downloader.convert_to_graph(gdf)
+            
+            # Guardar grafo para próxima vez
+            print(f"💾 Guardando grafo procesado en caché...")
+            import pickle
+            with open(pkl_file, 'wb') as f:
+                pickle.dump(G, f)
+            
+            # Procesar el grafo
+            self.graph = G
+            self._process_networkx_graph(G)
+            
+            print(f"✅ Red vial MTC cargada: {self.num_nodes:,} nodos, {self.num_edges:,} aristas")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error al cargar red vial MTC: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def load_hospitals_minsa(self, region_key: str = 'cusco', solo_hospitales: bool = True) -> List[Dict]:
+        """
+        Carga datos de hospitales oficiales del MINSA.
+        
+        Args:
+            region_key: Región (ej: 'cusco')
+            solo_hospitales: Si solo incluir hospitales (no centros de salud)
+            
+        Returns:
+            Lista de hospitales con información completa
+        """
+        if not MTC_MINSA_AVAILABLE:
+            print("❌ Módulos MINSA no disponibles")
+            # Fallback a datos estáticos
+            return get_hospitales_region(region_key)
+        
+        try:
+            print(f"🏥 Cargando establecimientos de salud MINSA para {region_key}...")
+            
+            downloader = MINSADataDownloader()
+            
+            # Descargar establecimientos
+            df = downloader.download_establecimientos_cusco(
+                solo_hospitales=solo_hospitales,
+                cache=True
+            )
+            
+            if df is None:
+                print("⚠️  Usando datos estáticos de hospitales")
+                return get_hospitales_region(region_key)
+            
+            # Convertir a formato para el grafo
+            hospitales = downloader.get_hospitales_para_grafo(df)
+            
+            print(f"✅ Cargados {len(hospitales)} establecimientos del MINSA")
+            return hospitales
+            
+        except Exception as e:
+            print(f"⚠️  Error al cargar MINSA: {e}")
+            print("⚠️  Usando datos estáticos de hospitales")
+            return get_hospitales_region(region_key)
     
     def find_nearest_hospitals(self, lat: float, lon: float, region_key: str, max_hospitals: int = 5) -> List[Dict]:
         """

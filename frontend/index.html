@@ -293,7 +293,11 @@
                     </div>
                     
                     <button onclick="cargarMapaRegion()" class="btn-primary" style="width: 100%; padding: 10px; margin: 10px 0; background: #2ecc71;">
-                        🗺️ Cargar Mapa de la Región
+                        🗺️ Cargar Mapa OSM
+                    </button>
+                    
+                    <button onclick="cargarMapaMTC()" class="btn-primary" style="width: 100%; padding: 10px; margin: 10px 0; background: #3498db;">
+                        🏛️ Cargar Red Vial Oficial MTC
                     </button>
                     
                     <div id="mapLoadStatus" style="padding: 8px; margin: 8px 0; border-radius: 5px; display:none; font-size: 0.85em;"></div>
@@ -406,6 +410,7 @@
         const API_URL = 'http://localhost:8000/api';
         let map;
         let graphData = null;
+        let graphLoaded = false; // Flag para saber si el grafo backend está cargado
         let currentMarkers = [];
         let currentPaths = [];
         let userMarker = null;
@@ -532,7 +537,7 @@
         }
         
         // FUNCIÓN PRINCIPAL: Ubicar dirección y buscar hospitales automáticamente
-        // Cargar mapa de la región seleccionada
+        // Cargar mapa de la región seleccionada (OpenStreetMap)
         async function cargarMapaRegion() {
             const region = document.getElementById('regionSelect').value;
             const mapLoadStatusDiv = document.getElementById('mapLoadStatus');
@@ -545,7 +550,7 @@
             selectedRegion = region;
             mapLoadStatusDiv.style.display = 'block';
             mapLoadStatusDiv.style.background = '#fff3cd';
-            mapLoadStatusDiv.innerHTML = '⏳ Cargando grafo de la región...';
+            mapLoadStatusDiv.innerHTML = '⏳ Cargando grafo desde OpenStreetMap...';
             
             try {
                 const response = await fetch(`${API_URL}/download_region`, {
@@ -557,9 +562,10 @@
                 const data = await response.json();
                 
                 if (data.success) {
+                    graphLoaded = true; // Marcar grafo como cargado
                     mapLoadStatusDiv.style.background = '#d4edda';
-                    mapLoadStatusDiv.innerHTML = `✅ <strong>Grafo cargado:</strong> ${data.num_nodes.toLocaleString()} nodos, ${data.num_edges.toLocaleString()} aristas`;
-                    showStatus(`✅ Mapa de ${region} cargado exitosamente`, 'success');
+                    mapLoadStatusDiv.innerHTML = `✅ <strong>OSM cargado:</strong> ${data.num_nodes.toLocaleString()} nodos, ${data.num_edges.toLocaleString()} aristas<br><small>Fuente: ${data.source || 'OpenStreetMap'}</small>`;
+                    showStatus(`✅ Mapa OSM de ${region} cargado exitosamente`, 'success');
                 } else {
                     mapLoadStatusDiv.style.background = '#f8d7da';
                     mapLoadStatusDiv.innerHTML = '❌ Error al cargar el grafo';
@@ -569,6 +575,80 @@
                 mapLoadStatusDiv.style.background = '#f8d7da';
                 mapLoadStatusDiv.innerHTML = `❌ Error: ${error.message}`;
                 showStatus('❌ Error al cargar mapa', 'error');
+            }
+        }
+        
+        // Cargar red vial oficial del MTC
+        async function cargarMapaMTC() {
+            const region = document.getElementById('regionSelect').value;
+            const mapLoadStatusDiv = document.getElementById('mapLoadStatus');
+            
+            if (!region) {
+                alert('Selecciona un departamento primero');
+                return;
+            }
+            
+            selectedRegion = region;
+            mapLoadStatusDiv.style.display = 'block';
+            mapLoadStatusDiv.style.background = '#fff3cd';
+            mapLoadStatusDiv.innerHTML = '⏳ Cargando red vial oficial del MTC...<br><small>⏱️ Puede tardar 15-30 segundos (grafo de 1.8M nodos)</small>';
+            
+            try {
+                // Crear AbortController con timeout extendido de 60 segundos
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 60000);
+                
+                const response = await fetch(`${API_URL}/download_mtc?region_key=${region}&incluir_vecinal=true`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Error al cargar red vial MTC');
+                }
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Marcar grafo como cargado
+                    graphLoaded = true;
+                    
+                    mapLoadStatusDiv.style.background = '#d4edda';
+                    mapLoadStatusDiv.innerHTML = `✅ <strong>Red Vial MTC cargada:</strong> ${data.num_nodes.toLocaleString()} nodos, ${data.num_edges.toLocaleString()} aristas<br><small>🏛️ Fuente: ${data.source}</small><br><small>Incluye vías vecinales: ${data.incluye_vecinal ? 'Sí' : 'No'}</small>`;
+                    showStatus(`✅ Red vial oficial MTC de ${region} cargada exitosamente`, 'success');
+                    
+                    // Centrar mapa en la región según coordenadas
+                    const regionCenters = {
+                        'cusco': [-13.5319, -71.9675],
+                        'lima': [-12.046, -77.043],
+                        'arequipa': [-16.4090, -71.5375],
+                        'trujillo': [-8.1116, -79.0288],
+                        'piura': [-5.1945, -80.6328]
+                    };
+                    
+                    if (regionCenters[region]) {
+                        map.setView(regionCenters[region], 13);
+                        console.log(`🗺️ Mapa centrado en ${region}:`, regionCenters[region]);
+                    }
+                } else {
+                    mapLoadStatusDiv.style.background = '#f8d7da';
+                    mapLoadStatusDiv.innerHTML = '❌ Error al cargar red vial MTC';
+                    showStatus('❌ Error al cargar red vial MTC', 'error');
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    mapLoadStatusDiv.style.background = '#f8d7da';
+                    mapLoadStatusDiv.innerHTML = '❌ Timeout: El grafo es muy grande. Intenta con área.osm.json';
+                    showStatus('❌ Timeout al cargar MTC', 'error');
+                } else {
+                    mapLoadStatusDiv.style.background = '#f8d7da';
+                    mapLoadStatusDiv.innerHTML = `❌ Error: ${error.message}`;
+                    showStatus('❌ Error al cargar red vial MTC', 'error');
+                }
             }
         }
         
@@ -673,6 +753,12 @@
             hospitalMarkers.forEach(m => map.removeLayer(m));
             hospitalMarkers = [];
             
+            console.log('📍 Mostrando hospitales en mapa:', hospitals.map(h => ({
+                name: h.name,
+                lat: h.lat,
+                lon: h.lon
+            })));
+            
             hospitals.forEach((hospital, index) => {
                 const marker = L.marker([hospital.lat, hospital.lon], {
                     icon: L.icon({
@@ -728,6 +814,12 @@
         
         // Calcular ruta al hospital seleccionado
         async function calcularRutasAutomatico() {
+            // Verificar que el grafo esté cargado
+            if (!graphLoaded) {
+                alert('⚠️ Primero debes cargar la red vial.\n\nHaz clic en "Cargar Red Vial Oficial MTC" o "Descargar Mapa del Distrito"');
+                return;
+            }
+            
             if (!userLocation || nearbyHospitals.length === 0) {
                 alert('Primero busca hospitales cercanos');
                 return;
@@ -742,7 +834,7 @@
             
             const selectedHospital = nearbyHospitals[parseInt(selectedIndex)];
             
-            showStatus(`🚑 Calculando rutas con ${getSelectedAlgorithms().length} algoritmos...`, 'info');
+            showStatus(`🚑 Calculando ruta a ${selectedHospital.name}...`, 'info');
             
             try {
                 const response = await fetch(`${API_URL}/calculate_hospital_routes`, {
@@ -752,6 +844,7 @@
                         region_key: selectedRegion,
                         user_lat: userLocation.lat,
                         user_lon: userLocation.lon,
+                        hospital_name: selectedHospital.name,  // Enviar hospital específico
                         algorithms: getSelectedAlgorithms(),
                         use_cuda: document.getElementById('useCuda').checked
                     })
@@ -767,6 +860,9 @@
                 // Filtrar solo rutas del hospital seleccionado si existe
                 if (selectedHospital && data.routes) {
                     data.routes = data.routes.filter(r => r.hospital_name === selectedHospital.name);
+                }
+                if (selectedHospital && data.algorithm_runs) {
+                    data.algorithm_runs = data.algorithm_runs.filter(r => r.hospital_name === selectedHospital.name);
                 }
                 
                 displayRouteResults(data);
@@ -1495,6 +1591,14 @@
                 'khanna2022': '#2ecc71',
                 'wang2021': '#f39c12'
             };
+
+            // Estilos para distinguir trazos aunque el camino sea el mismo
+            const algorithmDash = {
+                'dijkstra': null,
+                'duan2025': '10, 6',
+                'khanna2022': '2, 8',
+                'wang2021': '14, 6, 2, 6'
+            };
             
             const algorithmNames = {
                 'dijkstra': 'Dijkstra',
@@ -1530,13 +1634,13 @@
                             color: color,
                             weight: 4,
                             opacity: 0.7,
-                            dashArray: idx > 0 ? '10, 5' : null
+                            dashArray: (algorithmDash[algo] !== undefined) ? algorithmDash[algo] : (idx > 0 ? '10, 5' : null)
                         }).addTo(map);
                         
                         polyline.bindPopup(`
                             <b>${route.hospital_name}</b><br>
                             <span style="color: ${color};">●</span> Algoritmo: <b>${route.algorithm}</b><br>
-                            Distancia: ${route.path_distance.toFixed(2)} km<br>
+                            Distancia: ${route.path_distance_km.toFixed(2)} km<br>
                             Tiempo: ${route.metrics.execution_time.toFixed(3)} s<br>
                             Nodos procesados: ${route.metrics.nodes_processed}
                         `);
@@ -1575,7 +1679,7 @@
                                     <strong>🏥 Hospital:</strong> ${route.hospital_name}
                                 </div>
                                 <div style="margin-bottom: 8px;">
-                                    <strong>📏 Distancia:</strong> ${route.path_distance.toFixed(2)} km
+                                    <strong>📏 Distancia:</strong> ${route.path_distance_km.toFixed(2)} km
                                 </div>
                                 <hr style="border: none; border-top: 1px solid #eee; margin: 10px 0;">
                                 <div style="background: #f8f9fa; padding: 10px; border-radius: 5px;">
@@ -1616,6 +1720,55 @@
                 }
             }).join('');
             
+            // Tabla y gráficos (incluye fallos) a partir de algorithm_runs
+            const runs = Array.isArray(data.algorithm_runs) ? data.algorithm_runs : [];
+            const runByAlgo = {};
+            runs.forEach(r => {
+                if (!r || !r.algorithm) return;
+                runByAlgo[String(r.algorithm).toLowerCase()] = r;
+            });
+
+            // Construir tabla: una fila por algoritmo seleccionado
+            const tableRows = selectedAlgos.map(algo => {
+                const key = algo.toLowerCase();
+                const run = runByAlgo[key];
+                const color = algorithmColors[key] || '#9b59b6';
+
+                const ok = run?.success === true;
+                const metrics = run?.metrics;
+                const details = metrics?.details || {};
+
+                const timeS = (metrics && typeof metrics.execution_time === 'number') ? metrics.execution_time : null;
+                const nodesP = (metrics && typeof metrics.nodes_processed === 'number') ? metrics.nodes_processed : null;
+                const relax = (metrics && typeof metrics.edge_relaxations === 'number') ? metrics.edge_relaxations : null;
+                const mem = (metrics && typeof metrics.memory_peak_mb === 'number') ? metrics.memory_peak_mb : null;
+
+                // Distancia: preferir run.path_distance_km; si no, tomar de routes
+                let distKm = (run && typeof run.path_distance_km === 'number') ? run.path_distance_km : null;
+                if (distKm === null && routesByAlgorithm[key] && routesByAlgorithm[key][0]) {
+                    distKm = routesByAlgorithm[key][0].path_distance_km;
+                }
+
+                const mode = (details && typeof details.mode === 'string') ? details.mode : '';
+                const variant = (details && typeof details.route_variant === 'string') ? details.route_variant : '';
+                const err = run?.error ? String(run.error) : '';
+
+                return `
+                    <tr>
+                        <td><span style="color:${color}; font-weight:700;">●</span> ${algorithmNames[key] || algo}</td>
+                        <td>${ok ? '<span style="color:#2e7d32; font-weight:700;">OK</span>' : '<span style="color:#c62828; font-weight:700;">ERR</span>'}</td>
+                        <td>${distKm !== null ? distKm.toFixed(3) : 'N/A'}</td>
+                        <td>${timeS !== null ? timeS.toFixed(4) : 'N/A'}</td>
+                        <td>${nodesP !== null ? nodesP.toLocaleString() : 'N/A'}</td>
+                        <td>${relax !== null ? relax.toLocaleString() : 'N/A'}</td>
+                        <td>${mem !== null ? mem.toFixed(2) : 'N/A'}</td>
+                        <td>${mode || 'N/A'}</td>
+                        <td>${variant || ''}</td>
+                        <td style="color:#666; font-size:0.85em;">${!ok ? err : ''}</td>
+                    </tr>
+                `;
+            }).join('');
+
             resultsDiv.innerHTML = `
                 <h3 style="margin-bottom: 15px;">📊 Resultados por Algoritmo</h3>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px;">
@@ -1631,7 +1784,102 @@
                         return `<span style="margin-left: 10px;"><span style="color: ${color};">●</span> ${algoName}</span>`;
                     }).join('')}
                 </div>
+
+                <div style="margin-top: 18px;">
+                    <h3 style="margin: 0 0 10px 0;">📋 Tabla comparativa (completa)</h3>
+                    <table class="comparison-table">
+                        <thead>
+                            <tr>
+                                <th>Algoritmo</th>
+                                <th>Estado</th>
+                                <th>Distancia (km)</th>
+                                <th>Tiempo (s)</th>
+                                <th>Nodos Proc.</th>
+                                <th>Relax. Aristas</th>
+                                <th>Memoria (MB)</th>
+                                <th>Modo</th>
+                                <th>Variante</th>
+                                <th>Detalle error</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="chart-container"><canvas id="routeTimeChart"></canvas></div>
+                <div class="chart-container"><canvas id="routeWorkChart"></canvas></div>
             `;
+
+            // Gráficos: destruir anteriores si existen
+            window.__routeCharts = window.__routeCharts || { time: null, work: null };
+            try { window.__routeCharts.time?.destroy(); } catch (_) {}
+            try { window.__routeCharts.work?.destroy(); } catch (_) {}
+
+            // Datos para gráficos (solo métricas numéricas disponibles)
+            const chartLabels = selectedAlgos.map(a => (algorithmNames[a.toLowerCase()] || a));
+            const times = selectedAlgos.map(a => {
+                const m = runByAlgo[a.toLowerCase()]?.metrics;
+                return (m && typeof m.execution_time === 'number') ? m.execution_time : 0;
+            });
+            const nodes = selectedAlgos.map(a => {
+                const m = runByAlgo[a.toLowerCase()]?.metrics;
+                return (m && typeof m.nodes_processed === 'number') ? m.nodes_processed : 0;
+            });
+            const relax = selectedAlgos.map(a => {
+                const m = runByAlgo[a.toLowerCase()]?.metrics;
+                return (m && typeof m.edge_relaxations === 'number') ? m.edge_relaxations : 0;
+            });
+
+            // Chart: Tiempo
+            window.__routeCharts.time = new Chart(document.getElementById('routeTimeChart'), {
+                type: 'bar',
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: 'Tiempo (s)',
+                        data: times,
+                        backgroundColor: selectedAlgos.map(a => (algorithmColors[a.toLowerCase()] || '#9b59b6')),
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: { display: true, text: 'Tiempo por algoritmo' },
+                        legend: { display: false }
+                    },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
+
+            // Chart: Trabajo (nodos y relajaciones)
+            window.__routeCharts.work = new Chart(document.getElementById('routeWorkChart'), {
+                type: 'bar',
+                data: {
+                    labels: chartLabels,
+                    datasets: [
+                        {
+                            label: 'Nodos procesados',
+                            data: nodes,
+                            backgroundColor: 'rgba(102, 126, 234, 0.65)'
+                        },
+                        {
+                            label: 'Relajaciones',
+                            data: relax,
+                            backgroundColor: 'rgba(244, 67, 54, 0.55)'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: { display: true, text: 'Trabajo interno (nodos/relajaciones)' }
+                    },
+                    scales: { y: { beginAtZero: true } }
+                }
+            });
             
             const successCount = successfulAlgos.size;
             const totalCount = selectedAlgos.length;

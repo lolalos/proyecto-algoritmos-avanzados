@@ -7,24 +7,43 @@ HOSPITALES_PERU = {
     'cusco': [
         {
             'name': 'Hospital Regional Cusco',
-            'lat': -13.5226,
-            'lon': -71.9673,
+            'lat': -13.522472,
+            'lon': -71.967461,
             'tipo': 'Regional',
-            'nivel': 'III-1'
+            'nivel': 'III-1',
+            'direccion': 'Av. de la Cultura S/N, Wanchaq, Cusco 08003'
         },
         {
             'name': 'Hospital Antonio Lorena',
-            'lat': -13.5170,
-            'lon': -71.9780,
+            'lat': -13.519437,
+            'lon': -71.964750,
             'tipo': 'General',
-            'nivel': 'III-1'
+            'nivel': 'II-2',
+            'direccion': 'Av. de la Cultura 720, Plaza Túpac Amaru, Wanchaq, Cusco 08003'
         },
         {
             'name': 'Hospital Adolfo Guevara Velasco (EsSalud)',
-            'lat': -13.5320,
-            'lon': -71.9625,
+            'lat': -13.518803,
+            'lon': -71.964425,
             'tipo': 'Seguridad Social',
-            'nivel': 'III-1'
+            'nivel': 'III-1',
+            'direccion': 'Av. de la Cultura 705, Wanchaq, Cusco 08003'
+        },
+        {
+            'name': 'Clínica Pardo',
+            'lat': -13.524489,
+            'lon': -71.975198,
+            'tipo': 'Privada',
+            'nivel': 'III-1',
+            'direccion': 'Av. de la Cultura 710, Cusco 08000'
+        },
+        {
+            'name': 'Hospital de Contingencia Solidaridad',
+            'lat': -13.531662,
+            'lon': -71.978771,
+            'tipo': 'Contingencia',
+            'nivel': 'II-2',
+            'direccion': 'Av. Circunvalación 1958, Santiago, Cusco 08000'
         }
     ],
     

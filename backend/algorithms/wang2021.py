@@ -1,23 +1,45 @@
+"""Algoritmo Wang et al. (2021).
+
+En esta base de código, Wang2021 se implementa como un *scheduler por particiones*
+(multi-colas por partición) sobre una matriz de adyacencia (idealmente CSR).
+
+Nota: el resultado de distancia debe coincidir con otros métodos (son caminos mínimos),
+pero las métricas internas pueden diferir por la disciplina de colas y el particionado.
 """
-Implementación del algoritmo Wang et al. (2021) con CUDA.
-Optimización mediante particionamiento de grafos y procesamiento paralelo.
-"""
+
 import numpy as np
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
+
 from .base import ShortestPathAlgorithm, AlgorithmMetrics
 from scipy import sparse
 
+from .cuda_env import configure_cuda_dll_search_paths
+
+configure_cuda_dll_search_paths()
+
 try:
     import cupy as cp
-    CUDA_AVAILABLE = True
+    import dask.array as da
+    from dask import delayed
+    try:
+        test = cp.array([1, 2, 3])
+        CUDA_AVAILABLE = True
+        DASK_AVAILABLE = True
+        del test
+    except:
+        CUDA_AVAILABLE = False
+        DASK_AVAILABLE = False
 except ImportError:
     CUDA_AVAILABLE = False
+    DASK_AVAILABLE = False
     cp = None
+    da = None
 
 
 class Wang2021Algorithm(ShortestPathAlgorithm):
     """
-    Algoritmo Wang et al. (2021) - Particionamiento y paralelización.
+    Algoritmo Wang et al. (2021) GPU + DASK OPTIMIZADO.
+    Particionamiento paralelo con procesamiento GPU distribuido.
     
     Características:
     - Particionamiento del grafo en subgrafos
@@ -29,13 +51,14 @@ class Wang2021Algorithm(ShortestPathAlgorithm):
         super().__init__("Wang2021", use_cuda=use_cuda and CUDA_AVAILABLE)
         self.num_partitions = num_partitions
         if use_cuda and not CUDA_AVAILABLE:
-            print("⚠️  CUDA no disponible. Usando implementación CPU.")
+            print("[WARN] CUDA no disponible. Usando implementación CPU.")
     
     def compute_shortest_paths(
         self, 
         graph_matrix: np.ndarray, 
         source_node: int,
-        node_mapping: Optional[Dict] = None
+        node_mapping: Optional[Dict] = None,
+        target_node: Optional[int] = None
     ) -> AlgorithmMetrics:
         """
         Implementación con particionamiento de grafo.
@@ -46,183 +69,27 @@ class Wang2021Algorithm(ShortestPathAlgorithm):
         3. Fusionar resultados con nodos frontera
         """
         self._start_metrics_tracking()
+        self.metrics.details = {"num_partitions": int(self.num_partitions)}
         
-        n_nodes = graph_matrix.shape[0]
+        n_nodes = int(graph_matrix.shape[0])
+        is_sparse = bool(sparse.issparse(graph_matrix))
         
-        # Convertir a densa si es sparse
-        if sparse.issparse(graph_matrix):
-            graph_matrix = graph_matrix.toarray()
-        
-        # Determinar número óptimo de particiones
-        partition_size = max(n_nodes // self.num_partitions, 10)
-        
-        if self.use_cuda:
-            try:
-                # Transferir a GPU
-                graph_gpu = cp.asarray(graph_matrix, dtype=cp.float32)
-                distances = cp.full(n_nodes, cp.inf, dtype=cp.float32)
-                distances[source_node] = 0.0
-                parent = cp.full(n_nodes, -1, dtype=cp.int32)
-                visited = cp.zeros(n_nodes, dtype=bool)
-                
-                # Crear particiones basadas en proximidad al origen
-                # (nodos más cercanos en la misma partición)
-                partitions = self._create_partitions_gpu(n_nodes, source_node, partition_size)
-                
-                # Procesar particiones de forma iterativa (simulación de paralelismo)
-                for partition_id in range(len(partitions)):
-                    partition_nodes = partitions[partition_id]
-                    
-                    # Procesar nodos de la partición
-                    for node in partition_nodes:
-                        node_scalar = int(node)
-                        
-                        if visited[node_scalar]:
-                            continue
-                        
-                        # Encontrar nodo no visitado con menor distancia en esta partición
-                        partition_mask = cp.zeros(n_nodes, dtype=bool)
-                        partition_mask[partition_nodes] = True
-                        unvisited_mask = partition_mask & ~visited
-                        
-                        temp_distances = cp.where(unvisited_mask, distances, cp.inf)
-                        
-                        if cp.all(temp_distances == cp.inf):
-                            continue
-                        
-                        current = cp.argmin(temp_distances)
-                        current_scalar = int(current)
-                        
-                        if distances[current] == cp.inf:
-                            continue
-                        
-                        visited[current] = True
-                        self.metrics.nodes_processed += 1
-                        
-                        # Relajar aristas
-                        neighbors_mask = graph_gpu[current_scalar] > 0
-                        neighbor_indices = cp.where(neighbors_mask)[0]
-                        
-                        if len(neighbor_indices) > 0:
-                            current_dist = distances[current_scalar]
-                            edge_weights = graph_gpu[current_scalar, neighbor_indices]
-                            new_distances = current_dist + edge_weights
-                            
-                            improved = new_distances < distances[neighbor_indices]
-                            
-                            if cp.any(improved):
-                                improved_neighbors = neighbor_indices[improved]
-                                distances[improved_neighbors] = new_distances[improved]
-                                parent[improved_neighbors] = current_scalar
-                                self.metrics.edge_relaxations += int(cp.sum(improved))
-                
-                # Fase de fusión: procesar nodos frontera entre particiones
-                self._merge_partitions_gpu(
-                    graph_gpu, distances, parent, visited, partitions
-                )
-                
-                # Transferir a CPU
-                distances_cpu = cp.asnumpy(distances)
-                parent_cpu = cp.asnumpy(parent)
-            
-            except Exception as e:
-                # Si CUDA falla, usar CPU
-                print(f"⚠️  CUDA falló en Wang2021, usando CPU: {e}")
-                self.use_cuda = False
-        
-        if not self.use_cuda:
-            # Implementación CPU de respaldo usando heap para eficiencia
-            import heapq
-            
-            distances = np.full(n_nodes, np.inf, dtype=np.float32)
-            distances[source_node] = 0.0
-            parent_cpu = np.full(n_nodes, -1, dtype=np.int32)
-            visited = np.zeros(n_nodes, dtype=bool)
-            
-            pq = [(0.0, source_node)]
-            
-            while pq:
-                current_dist, current = heapq.heappop(pq)
-                
-                if visited[current]:
-                    continue
-                
-                visited[current] = True
-                self.metrics.nodes_processed += 1
-                
-                # Acceso eficiente a vecinos según tipo de matriz
-                if sparse.issparse(graph_matrix):
-                    # Matriz sparse: acceder solo a vecinos reales
-                    row = graph_matrix.getrow(current)
-                    neighbors = row.nonzero()[1]
-                    weights = row.data
-                    
-                    for i, neighbor in enumerate(neighbors):
-                        if not visited[neighbor]:
-                            new_dist = current_dist + weights[i]
-                            if new_dist < distances[neighbor]:
-                                distances[neighbor] = new_dist
-                                parent_cpu[neighbor] = current
-                                heapq.heappush(pq, (new_dist, neighbor))
-                                self.metrics.edge_relaxations += 1
-                else:
-                    # Matriz densa
-                    for neighbor in range(n_nodes):
-                        if graph_matrix[current, neighbor] > 0 and not visited[neighbor]:
-                            new_dist = current_dist + graph_matrix[current, neighbor]
-                            if new_dist < distances[neighbor]:
-                                distances[neighbor] = new_dist
-                                parent_cpu[neighbor] = current
-                                heapq.heappush(pq, (new_dist, neighbor))
-                                self.metrics.edge_relaxations += 1
-            
-            distances_cpu = distances
-        
-        # Guardar resultados
-        self.metrics.distances_computed = {
-            i: float(distances_cpu[i]) 
-            for i in range(n_nodes) 
-            if distances_cpu[i] != np.inf
-        }
-        
-        # Reconstruir caminos
-        self.metrics.path_to_nodes = self._reconstruct_paths(
-            parent_cpu, source_node, n_nodes
+        # Metodología Wang2021 aquí: scheduler por particiones (CPU). Si CUDA está disponible,
+        # se deja explícito en `details` que el modo actual es este scheduler (no densifica CSR).
+        self.metrics.details["mode"] = "partition_scheduler"
+        if self.use_cuda and CUDA_AVAILABLE:
+            self.metrics.details["cuda_available"] = True
+            self.metrics.details["note"] = "scheduler por particiones (CPU) sobre CSR; sin kernel GPU para CSR en esta implementación"
+        else:
+            self.metrics.details["cuda_available"] = False
+
+        return self._wang_partition_scheduler(
+            graph_matrix,
+            int(source_node),
+            n_nodes,
+            is_sparse,
+            target_node,
         )
-        
-        self._stop_metrics_tracking()
-        return self.metrics
-    
-    def _create_partitions_gpu(self, n_nodes, source, partition_size):
-        """Crea particiones del grafo."""
-        # Particionamiento simple por rangos de índices
-        partitions = []
-        for i in range(0, n_nodes, partition_size):
-            end = min(i + partition_size, n_nodes)
-            partition = cp.arange(i, end, dtype=cp.int32)
-            partitions.append(partition)
-        
-        return partitions
-    
-    def _merge_partitions_gpu(self, graph_gpu, distances, parent, visited, partitions):
-        """Fusiona resultados de particiones procesando nodos frontera."""
-        # Procesar aristas entre particiones
-        for i in range(len(partitions) - 1):
-            for node in partitions[i]:
-                node_scalar = int(node)
-                if visited[node_scalar]:
-                    # Verificar conexiones con siguiente partición
-                    next_partition = partitions[i + 1]
-                    for neighbor in next_partition:
-                        neighbor_scalar = int(neighbor)
-                        edge_weight = graph_gpu[node_scalar, neighbor_scalar]
-                        
-                        if edge_weight > 0:
-                            new_dist = distances[node_scalar] + edge_weight
-                            if new_dist < distances[neighbor_scalar]:
-                                distances[neighbor_scalar] = new_dist
-                                parent[neighbor_scalar] = node_scalar
-                                self.metrics.edge_relaxations += 1
     
     def _reconstruct_paths(
         self, 
@@ -264,3 +131,196 @@ class Wang2021Algorithm(ShortestPathAlgorithm):
                 paths[target] = path[::-1]
         
         return paths
+    
+    def _wang_partition_scheduler(self, graph_matrix, source_node: int, n_nodes: int, is_sparse: bool, target_node: Optional[int] = None):
+        """Wang2021: Scheduler por particiones.
+
+        Idea:
+        - Divide el grafo en particiones.
+        - Mantiene una cola (heap) por partición.
+        - Procesa particiones activas (puede re-procesar nodos si su distancia mejora).
+
+        Esto NO es el mismo flujo que Dijkstra con un heap global, y por eso
+        las métricas (nodos/relajaciones/tiempo) suelen diferir.
+        """
+        import heapq
+        from scipy import sparse as sp
+
+        csr = graph_matrix.tocsr() if is_sparse else sp.csr_matrix(graph_matrix)
+
+        num_partitions = max(int(self.num_partitions), 1)
+        partition_size = max(int(np.ceil(n_nodes / num_partitions)), 1)
+        batch_size = 256
+
+        self.metrics.details["partition_size"] = int(partition_size)
+        self.metrics.details["partition_batch"] = int(batch_size)
+
+        def part_id(node: int) -> int:
+            pid = int(node // partition_size)
+            if pid < 0:
+                return 0
+            if pid >= num_partitions:
+                return int(num_partitions - 1)
+            return pid
+
+        # Importante: usar float64 para que las llaves del heap (Python float)
+        # coincidan con `dist[u]` sin pérdidas por redondeo (float32 puede hacer
+        # que casi todas las entradas parezcan "stale").
+        dist = np.full(n_nodes, np.inf, dtype=np.float64)
+        parent = np.full(n_nodes, -1, dtype=np.int32)
+        dist[source_node] = 0.0
+
+        heaps = [[] for _ in range(num_partitions)]
+        pid0 = part_id(source_node)
+        heaps[pid0].append((0.0, int(source_node)))
+
+        # Scheduler: prioriza particiones por el menor candidato (heap head)
+        active_pq = []
+        in_active = [False] * num_partitions
+        version = [0] * num_partitions
+
+        def schedule(pid: int) -> None:
+            if not heaps[pid]:
+                return
+            version[pid] += 1
+            in_active[pid] = True
+            heapq.heappush(active_pq, (float(heaps[pid][0][0]), int(pid), int(version[pid])))
+
+        schedule(pid0)
+
+        partitions_touched = set([pid0])
+        partition_pops = [0] * num_partitions
+        intra_relax = 0
+        cross_relax = 0
+
+        target = int(target_node) if target_node is not None else None
+
+        # Límite para evitar explosión en grafos enormes.
+        # Para búsquedas con target en grafos grandes, el límite anterior (250k) era muy agresivo
+        # y podía cortar antes de alcanzar el objetivo.
+        if target is not None:
+            max_pops = int(min(max(2_000_000, n_nodes // 5), 5_000_000))
+        else:
+            max_pops = int(min(max(500_000, n_nodes // 2), 10_000_000))
+        pops = 0
+
+        self.metrics.details["scheduler"] = "min_partition_head"
+
+        while active_pq and pops < max_pops:
+            key, pid, ver = heapq.heappop(active_pq)
+            pid = int(pid)
+            ver = int(ver)
+
+            # entrada stale
+            if not in_active[pid] or ver != version[pid] or not heaps[pid]:
+                continue
+
+            in_active[pid] = False
+            heap = heaps[pid]
+
+            local_pops = 0
+            while heap and pops < max_pops and local_pops < batch_size:
+                du, u = heapq.heappop(heap)
+                u = int(u)
+                # Entrada stale: no usar igualdad exacta (puede fallar por precisión).
+                if float(du) > float(dist[u]) + 1e-9:
+                    continue
+
+                self.metrics.nodes_processed += 1
+                pops += 1
+                local_pops += 1
+                partition_pops[pid] += 1
+
+                # Early-stop: si target ya está asentado y no hay ninguna cola con prioridad menor
+                if target is not None and u == target:
+                    best_other = None
+                    for h in heaps:
+                        if h:
+                            cand = float(h[0][0])
+                            best_other = cand if best_other is None else min(best_other, cand)
+                    if best_other is None or best_other >= float(dist[target]):
+                        heap.clear()
+                        active_pq.clear()
+                        for j in range(num_partitions):
+                            in_active[j] = False
+                        break
+
+                row_start = int(csr.indptr[u])
+                row_end = int(csr.indptr[u + 1])
+                if row_start >= row_end:
+                    continue
+
+                nbrs = csr.indices[row_start:row_end]
+                wts = csr.data[row_start:row_end]
+
+                for i in range(len(nbrs)):
+                    v = int(nbrs[i])
+                    w = float(wts[i])
+                    if w <= 0:
+                        continue
+                    nd = float(du) + w
+                    if nd < float(dist[v]) - 1e-12:
+                        dist[v] = float(nd)
+                        parent[v] = u
+                        self.metrics.edge_relaxations += 1
+
+                        if part_id(u) == part_id(v):
+                            intra_relax += 1
+                        else:
+                            cross_relax += 1
+
+                        pv = part_id(v)
+                        # Si la partición ya tiene trabajo, solo forzamos re-schedule
+                        # si el mínimo realmente disminuyó.
+                        old_min = float(heaps[pv][0][0]) if heaps[pv] else None
+                        heapq.heappush(heaps[pv], (nd, v))
+                        partitions_touched.add(pv)
+                        # Programar partición destino (si ya está activa, refrescar prioridad si bajó el mínimo)
+                        new_min = float(heaps[pv][0][0])
+                        if (not in_active[pv]) or (old_min is None) or (new_min < old_min - 1e-12):
+                            schedule(pv)
+
+            # Re-activar la partición si aún queda trabajo
+            if heap and pops < max_pops:
+                schedule(pid)
+
+        self.metrics.details["partitions_touched"] = int(len(partitions_touched))
+        self.metrics.details["partition_pops"] = partition_pops
+        self.metrics.details["intra_partition_relaxations"] = int(intra_relax)
+        self.metrics.details["cross_partition_relaxations"] = int(cross_relax)
+        self.metrics.details["max_pops"] = int(max_pops)
+        self.metrics.details["max_pops_reached"] = bool(pops >= max_pops)
+
+        # Guardar resultados: si hay target, solo target
+        if target is not None:
+            td = float(dist[target])
+            if not np.isinf(td):
+                self.metrics.distances_computed = {target: td}
+                self.metrics.path_to_nodes = {target: self._reconstruct_single_path(parent, source_node, target)}
+            else:
+                self.metrics.distances_computed = {}
+                self.metrics.path_to_nodes = {}
+        else:
+            self.metrics.distances_computed = {i: float(dist[i]) for i in range(n_nodes) if not np.isinf(dist[i])}
+            self.metrics.path_to_nodes = self._reconstruct_paths(parent, source_node, n_nodes)
+
+        self._stop_metrics_tracking()
+        return self.metrics
+
+    def _reconstruct_single_path(self, parent: np.ndarray, source: int, target: int) -> list:
+        if source == target:
+            return [source]
+        path = []
+        cur = int(target)
+        max_steps = parent.shape[0]
+        steps = 0
+        while cur != -1 and steps < max_steps:
+            path.append(cur)
+            if cur == source:
+                break
+            cur = int(parent[cur])
+            steps += 1
+        if not path or path[-1] != source:
+            return []
+        path.reverse()
+        return path

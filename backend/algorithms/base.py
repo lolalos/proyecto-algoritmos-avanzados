@@ -4,7 +4,7 @@ Define la interfaz común y las métricas de evaluación.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import time
 import tracemalloc
 import numpy as np
@@ -20,6 +20,7 @@ class AlgorithmMetrics:
     memory_peak_mb: float = 0.0  # Uso máximo de memoria en MB
     distances_computed: Dict[int, float] = field(default_factory=dict)  # Distancias finales
     path_to_nodes: Dict[int, List[int]] = field(default_factory=dict)  # Caminos óptimos
+    details: Dict[str, Any] = field(default_factory=dict)  # Info adicional (modo, backend, etc.)
     
     def to_dict(self):
         """Convierte las métricas a diccionario para serialización."""
@@ -29,6 +30,7 @@ class AlgorithmMetrics:
             'nodes_processed': self.nodes_processed,
             'edge_relaxations': self.edge_relaxations,
             'memory_peak_mb': self.memory_peak_mb,
+            'details': self.details,
             'num_distances_computed': len(self.distances_computed),
             'avg_distance': np.mean(list(self.distances_computed.values())) if self.distances_computed else 0.0,
             'max_distance': max(self.distances_computed.values()) if self.distances_computed else 0.0
@@ -53,7 +55,8 @@ class ShortestPathAlgorithm(ABC):
         self, 
         graph_matrix: np.ndarray, 
         source_node: int,
-        node_mapping: Optional[Dict] = None
+        node_mapping: Optional[Dict] = None,
+        target_node: Optional[int] = None
     ) -> AlgorithmMetrics:
         """
         Calcula los caminos más cortos desde un nodo fuente.
@@ -62,6 +65,7 @@ class ShortestPathAlgorithm(ABC):
             graph_matrix: Matriz de adyacencia del grafo (NxN)
             source_node: Índice del nodo fuente
             node_mapping: Mapeo opcional de índices a IDs de nodos
+            target_node: Nodo objetivo (si se especifica, detiene cuando lo encuentra)
             
         Returns:
             AlgorithmMetrics con resultados y métricas de desempeño

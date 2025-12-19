@@ -8,22 +8,25 @@ python-multipart>=0.0.6
 # Procesamiento numérico
 numpy>=1.24.0
 scipy>=1.11.0
+pandas>=2.0.0
 
-# Aceleración GPU con CUDA (OPCIONAL - descomentar si tienes CUDA instalado)
-# cupy-cuda12x>=12.0.0  # Para CUDA 12.x
-# cupy-cuda11x>=12.0.0  # Para CUDA 11.x
-# numba>=0.58.0
+# Aceleración GPU con CUDA (REQUERIDO para GPUs NVIDIA)
+cupy-cuda13x>=13.0.0  # Para CUDA 13.x (ajustar según tu versión)
+numba>=0.60.0  # JIT compiler para kernels CUDA personalizados
 
-# Grafos y mapas (OPCIONAL - para descargar mapas de OSM)
-# osmnx>=1.6.0
-# networkx>=3.0.0
-# geopandas>=0.14.0
+# NOTA: cuGraph/cuDF no soportan Python 3.13 en Windows aún
+# Alternativa: Usar CuPy + Numba para implementar algoritmos GPU nativos
+dask>=2024.0.0  # Computación distribuida y paralela
+dask[distributed]>=2024.0.0  # Backend distribuido para Dask
+
+# Grafos y mapas (MTC, MINSA - datos del gobierno peruano)
+networkx>=3.0.0
+geopandas>=0.14.0
+pyogrio>=0.7.0  # Lector de shapefiles optimizado
+shapely>=2.0.0
+pyproj>=3.6.0
 
 # Utilidades
 pydantic>=2.0.0
 python-dotenv>=1.0.0
-psutil>=5.9.0  # Para información del sistema (CPU, RAM)
-
-# Opcional: Visualización y análisis
-# matplotlib>=3.8.0
-# pandas>=2.0.0
+psutil>=5.9.0  # Para información del sistema (CPU, RAM, GPU)

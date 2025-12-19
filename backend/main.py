@@ -6,10 +6,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import numpy as np
 import os
 import sys
+import logging
+
+# Configurar logging para filtrar mensajes de Chrome DevTools
+class DevToolsFilter(logging.Filter):
+    def filter(self, record):
+        return "well-known" not in record.getMessage() and "devtools" not in record.getMessage().lower()
+
+# Aplicar filtro a uvicorn
+uvicorn_access = logging.getLogger("uvicorn.access")
+uvicorn_access.addFilter(DevToolsFilter())
 
 # Importar módulos del proyecto
 from graph import UrbanGraph
@@ -17,6 +27,7 @@ from algorithms.dijkstra import DijkstraAlgorithm, DijkstraPriorityQueue
 from algorithms.duan2025 import Duan2025Algorithm
 from algorithms.khanna2022 import Khanna2022Algorithm
 from algorithms.wang2021 import Wang2021Algorithm
+from algorithms.delta_stepping import DeltaSteppingGPU
 
 # Importar datos de regiones y hospitales
 from regiones import get_all_departamentos
@@ -28,6 +39,44 @@ app = FastAPI(
     description="Comparación de algoritmos con aceleración CUDA para redes viales urbanas",
     version="1.0.0"
 )
+
+
+def _apply_edge_penalty_csr(csr_matrix, edges: set[tuple[int, int]], penalty_m: float) -> int:
+    """Aplica una penalización aditiva (en metros) a aristas (u,v) sobre CSR.
+
+    Devuelve cuántas aristas fueron encontradas y penalizadas.
+    """
+    from scipy import sparse as sp
+
+    if penalty_m <= 0 or not edges:
+        return 0
+
+    csr = csr_matrix.tocsr() if not sp.isspmatrix_csr(csr_matrix) else csr_matrix
+    penalized = 0
+
+    edges_by_u: Dict[int, list[int]] = {}
+    for u, v in edges:
+        edges_by_u.setdefault(int(u), []).append(int(v))
+
+    for u, vs in edges_by_u.items():
+        if u < 0 or u + 1 >= csr.indptr.shape[0]:
+            continue
+        row_start = int(csr.indptr[u])
+        row_end = int(csr.indptr[u + 1])
+        if row_start >= row_end:
+            continue
+
+        row_indices = csr.indices[row_start:row_end]
+        row_data = csr.data[row_start:row_end]
+
+        for v in vs:
+            for j in range(row_indices.shape[0]):
+                if int(row_indices[j]) == v:
+                    row_data[j] = float(row_data[j]) + float(penalty_m)
+                    penalized += 1
+                    break
+
+    return penalized
 
 # Configurar CORS para permitir solicitudes desde el frontend
 app.add_middleware(
@@ -58,14 +107,15 @@ class CoordinateRequest(BaseModel):
 
 class CompareAlgorithmsRequest(BaseModel):
     source_node: int
-    algorithms: List[str] = ['dijkstra', 'duan2025', 'khanna2022', 'wang2021']
+    algorithms: List[str] = ['delta_stepping', 'dijkstra', 'duan2025', 'khanna2022', 'wang2021']
     use_cuda: bool = True
 
 class HospitalRouteRequest(BaseModel):
     region_key: str
     user_lat: float
     user_lon: float
-    algorithms: List[str] = ['dijkstra', 'duan2025']
+    hospital_name: Optional[str] = None  # Hospital específico seleccionado
+    algorithms: List[str] = ['delta_stepping', 'dijkstra']
     use_cuda: bool = True
 
 
@@ -157,7 +207,6 @@ async def geocode_address(address: str, region: str = None, provincia: str = Non
     if region:
         full_address += f", {region}"
     full_address += ", Peru"
-    
     try:
         # Usar Nominatim de OpenStreetMap
         url = "https://nominatim.openstreetmap.org/search"
@@ -224,7 +273,8 @@ async def download_region(request: RegionDownloadRequest):
                     "success": True,
                     "message": f"Cusco cargado desde area.osm.json",
                     "num_nodes": urban_graph.num_nodes,
-                    "num_edges": urban_graph.num_edges
+                    "num_edges": urban_graph.num_edges,
+                    "source": "OpenStreetMap"
                 }
             else:
                 raise HTTPException(status_code=500, detail="Error al cargar area.osm.json")
@@ -302,7 +352,7 @@ output = Path(__file__).parent / 'mapas' / '{request.region_key}_graph.pkl'
 with open(output, 'wb') as f:
     pickle.dump({{'graph': G, 'num_nodes': G.number_of_nodes(), 'num_edges': G.number_of_edges()}}, f)
 
-print(f"✅ Generado: {{G.number_of_nodes()}} nodos, {{G.number_of_edges()}} aristas")
+print(f"[OK] Generado: {{G.number_of_nodes()}} nodos, {{G.number_of_edges()}} aristas")
 ''')
             
             # Ejecutar generación
@@ -334,6 +384,68 @@ print(f"✅ Generado: {{G.number_of_nodes()}} nodos, {{G.number_of_edges()}} ari
         }
     else:
         raise HTTPException(status_code=500, detail="Error al cargar región")
+
+@app.post("/api/download_mtc")
+async def download_mtc(region_key: str = 'cusco', incluir_vecinal: bool = True):
+    """
+    Carga red vial oficial del MTC (Ministerio de Transportes).
+    Fuente: Datos oficiales del gobierno peruano.
+    """
+    global graph_loaded
+    
+    try:
+        success = urban_graph.load_from_mtc(
+            region_key=region_key,
+            incluir_vecinal=incluir_vecinal
+        )
+        
+        if success:
+            graph_loaded = True
+            return {
+                "success": True,
+                "message": f"Red vial oficial MTC cargada para {region_key}",
+                "num_nodes": urban_graph.num_nodes,
+                "num_edges": urban_graph.num_edges,
+                "source": "MTC - Ministerio de Transportes y Comunicaciones",
+                "incluye_vecinal": incluir_vecinal
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Error al cargar red vial MTC")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.get("/api/hospitales_minsa/{region_key}")
+async def get_hospitales_minsa(region_key: str, solo_hospitales: bool = True):
+    """
+    Obtiene establecimientos de salud oficiales del MINSA.
+    Fuente: Registro Nacional de Establecimientos de Salud (RENAES).
+    """
+    try:
+        hospitales = urban_graph.load_hospitals_minsa(
+            region_key=region_key,
+            solo_hospitales=solo_hospitales
+        )
+        
+        return {
+            "success": True,
+            "region": region_key,
+            "total": len(hospitales),
+            "hospitales": hospitales,
+            "source": "MINSA - Ministerio de Salud"
+        }
+        
+    except Exception as e:
+        # Fallback a datos estáticos
+        hospitales = get_hospitales_region(region_key)
+        return {
+            "success": True,
+            "region": region_key,
+            "total": len(hospitales),
+            "hospitales": hospitales,
+            "source": "Datos estáticos (fallback)",
+            "warning": f"No se pudo conectar con MINSA: {str(e)}"
+        }
 
 @app.post("/api/download_distrito")
 async def download_distrito(departamento_key: str, provincia_key: str, distrito_key: str):
@@ -593,12 +705,12 @@ async def calculate_hospital_routes(request: HospitalRouteRequest):
     if not graph_loaded:
         raise HTTPException(status_code=400, detail="Grafo no cargado. Carga un mapa primero.")
     
-    print(f"\n🚑 Calculando rutas desde ({request.user_lat}, {request.user_lon})")
+    print(f"\nCalculando rutas desde ({request.user_lat}, {request.user_lon})")
     
     # 1. Encontrar nodo más cercano a la ubicación del usuario
     user_node = urban_graph.find_nearest_node(request.user_lat, request.user_lon)
     user_coords = urban_graph.get_node_info(user_node)
-    print(f"👤 Usuario en nodo {user_node}: ({user_coords['lat']:.5f}, {user_coords['lon']:.5f})")
+    print(f"Usuario en nodo {user_node}: ({user_coords['lat']:.5f}, {user_coords['lon']:.5f})")
     
     # 2. Obtener hospitales cercanos del departamento
     hospitales = urban_graph.find_nearest_hospitals(
@@ -614,38 +726,108 @@ async def calculate_hospital_routes(request: HospitalRouteRequest):
             detail=f"No hay hospitales registrados para {request.region_key}"
         )
     
-    print(f"🏥 Encontrados {len(hospitales)} hospitales cercanos")
+    print(f"Encontrados {len(hospitales)} hospitales cercanos")
+    
+    # Filtrar solo el hospital seleccionado si se especificó
+    if request.hospital_name:
+        hospitales = [h for h in hospitales if h['name'] == request.hospital_name]
+        if not hospitales:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Hospital '{request.hospital_name}' no encontrado"
+            )
+        print(f"Calculando solo para: {request.hospital_name}")
+    else:
+        # Si no se especificó, usar solo el más cercano
+        hospitales = hospitales[:1]
+        print(f"Calculando para el hospital más cercano: {hospitales[0]['name']}")
     
     # 3. Calcular rutas con cada algoritmo seleccionado
     all_routes = []
+    algorithm_runs: list[dict[str, Any]] = []
+    algorithm_errors: list[dict[str, Any]] = []
     graph_matrix = urban_graph.get_adjacency_matrix()
     
-    for hospital in hospitales[:3]:  # Top 3 hospitales más cercanos
+    for hospital in hospitales:
         hospital_node = hospital['node_index']
         hospital_coords = urban_graph.get_node_info(hospital_node)
         
-        print(f"\n🏥 {hospital['name']} (Nodo {hospital_node})")
+        print(f"\n{hospital['name']} (Nodo {hospital_node})")
         
+        used_edges: set[tuple[int, int]] = set()
+        algo_index = 0
+
         for algo_name in request.algorithms:
             try:
                 # Instanciar algoritmo
                 algorithm = _get_algorithm_instance(algo_name, request.use_cuda)
                 if algorithm is None:
-                    print(f"  ⚠️  Algoritmo {algo_name} no disponible")
+                    print(f"  [WARN] Algoritmo {algo_name} no disponible")
+                    algorithm_runs.append({
+                        "hospital_name": hospital["name"],
+                        "hospital_node": int(hospital_node),
+                        "algorithm": str(algo_name),
+                        "success": False,
+                        "error": "not_available",
+                    })
                     continue
+
+                # Matriz para este algoritmo: penalizar rutas previas (si existen)
+                matrix_for_algo = graph_matrix
+                penalty_m = 0.0
+                penalized_edges = 0
+                if used_edges:
+                    algo_index += 1
+                    penalty_m = float(20.0 * algo_index)
+                    try:
+                        matrix_for_algo = graph_matrix.copy()
+                        penalized_edges = _apply_edge_penalty_csr(matrix_for_algo, used_edges, penalty_m)
+                    except Exception:
+                        matrix_for_algo = graph_matrix
+                        penalty_m = 0.0
+                        penalized_edges = 0
                 
-                # Ejecutar algoritmo
-                print(f"  🔄 Ejecutando {algo_name}...")
+                # Ejecutar algoritmo con early stopping
+                print(f"  Ejecutando {algo_name}...")
                 metrics = algorithm.compute_shortest_paths(
-                    graph_matrix,
+                    matrix_for_algo,
                     user_node,
-                    urban_graph.node_mapping
+                    urban_graph.node_mapping,
+                    target_node=hospital_node  # Early stopping al encontrar el hospital
                 )
+
+                # Adjuntar info para auditoría
+                if isinstance(getattr(metrics, "details", None), dict):
+                    metrics.details.setdefault("route_variant", "baseline" if not used_edges else "avoid_prev_edges")
+                    if used_edges:
+                        metrics.details["edge_penalty_m"] = float(penalty_m)
+                        metrics.details["penalized_edges_count"] = int(penalized_edges)
                 
                 # Obtener ruta al hospital
                 if hospital_node in metrics.path_to_nodes:
                     path_indices = metrics.path_to_nodes[hospital_node]
-                    distance = metrics.distances_computed.get(hospital_node, 0)
+                    distance_from_metrics = metrics.distances_computed.get(hospital_node, 0)
+                    
+                    # CALCULAR DISTANCIA REAL DEL CAMINO sumando aristas
+                    path_distance_calculated = 0.0
+                    if len(path_indices) > 1:
+                        for i in range(len(path_indices) - 1):
+                            from_node = path_indices[i]
+                            to_node = path_indices[i + 1]
+                            # Obtener peso de la arista desde el grafo
+                            edge_weight = urban_graph.get_edge_weight(from_node, to_node)
+                            if edge_weight > 0:
+                                path_distance_calculated += edge_weight
+                    
+                    # Usar la distancia calculada (más precisa) o la de metrics
+                    distance = path_distance_calculated if path_distance_calculated > 0 else distance_from_metrics
+                    
+                    # Log de debugging
+                    if distance < 100:  # Si es menor a 100 metros, algo está mal
+                        print(f"    [WARN] Distancia sospechosa: {distance:.2f}m")
+                        print(f"        - Desde metrics: {distance_from_metrics:.2f}m")
+                        print(f"        - Calculada: {path_distance_calculated:.2f}m")
+                        print(f"        - Nodos en camino: {len(path_indices)}")
                     
                     # Convertir índices a coordenadas
                     path_coordinates = []
@@ -664,30 +846,82 @@ async def calculate_hospital_routes(request: HospitalRouteRequest):
                         "hospital_node": hospital_node,
                         "distance_direct_km": hospital['distance_direct_km'],
                         "algorithm": algo_name,
-                        "path_distance": distance / 1000,  # Convertir a km
+                        "path_distance_km": distance / 1000,  # Convertir a km
+                        "path_distance_m": distance,  # Distancia en metros para debugging
                         "path_coordinates": path_coordinates,
                         "num_nodes_in_path": len(path_indices),
-                        "metrics": {
-                            "execution_time": metrics.execution_time,
-                            "nodes_processed": metrics.nodes_processed,
-                            "edge_relaxations": metrics.edge_relaxations,
-                            "memory_peak_mb": metrics.memory_peak_mb
-                        }
+                        "metrics": metrics.to_dict()
+                    })
+
+                    # Registro completo por algoritmo (para tabla/gráficos en frontend)
+                    algorithm_runs.append({
+                        "hospital_name": hospital["name"],
+                        "hospital_node": int(hospital_node),
+                        "algorithm": str(algo_name),
+                        "success": True,
+                        "path_distance_km": float(distance / 1000),
+                        "path_distance_m": float(distance),
+                        "num_nodes_in_path": int(len(path_indices)),
+                        "metrics": metrics.to_dict(),
+                    })
+
+                    # Guardar aristas usadas para penalizar siguientes algoritmos
+                    if len(path_indices) > 1:
+                        for i in range(len(path_indices) - 1):
+                            used_edges.add((int(path_indices[i]), int(path_indices[i + 1])))
+                    
+                    print(f"    [OK] {distance/1000:.2f} km ({len(path_indices)} nodos), {metrics.execution_time:.3f}s")
+                else:
+                    print(f"    [ERR] No se encontro ruta")
+                    # Registrar la corrida aunque no haya ruta
+                    algorithm_runs.append({
+                        "hospital_name": hospital["name"],
+                        "hospital_node": int(hospital_node),
+                        "algorithm": str(algo_name),
+                        "success": False,
+                        "error": "no_route",
+                        "metrics": metrics.to_dict() if hasattr(metrics, "to_dict") else None,
+                    })
+                    algorithm_errors.append({
+                        "hospital_name": hospital["name"],
+                        "hospital_node": int(hospital_node),
+                        "algorithm": str(algo_name),
+                        "error": "no_route",
+                        "metrics": metrics.to_dict() if hasattr(metrics, "to_dict") else None,
                     })
                     
-                    print(f"    ✅ {distance/1000:.2f} km, {metrics.execution_time:.3f}s, {len(path_indices)} nodos")
-                else:
-                    print(f"    ❌ No se encontró ruta")
-                    
             except Exception as e:
-                print(f"    ❌ Error en {algo_name}: {e}")
+                print(f"    [ERR] Error en {algo_name}: {e}")
+                algorithm_runs.append({
+                    "hospital_name": hospital["name"],
+                    "hospital_node": int(hospital_node),
+                    "algorithm": str(algo_name),
+                    "success": False,
+                    "error": str(e),
+                })
+                algorithm_errors.append({
+                    "hospital_name": hospital["name"],
+                    "hospital_node": int(hospital_node),
+                    "algorithm": str(algo_name),
+                    "error": str(e),
+                })
                 continue
     
     # 4. Ordenar por distancia y algoritmo más rápido
     all_routes.sort(key=lambda x: (x['hospital_name'], x['metrics']['execution_time']))
     
-    print(f"\n✅ Calculadas {len(all_routes)} rutas exitosamente")
+    print(f"\n[OK] Calculadas {len(all_routes)} rutas exitosamente")
     
+    # Resumen comparativo (si hay datos)
+    comparison_results = []
+    for r in all_routes:
+        if isinstance(r.get('metrics'), dict) and 'execution_time' in r['metrics']:
+            comparison_results.append({
+                "algorithm": r.get("algorithm", ""),
+                "metrics": r["metrics"],
+            })
+    comparison = _create_comparison_table(comparison_results) if comparison_results else {}
+
     return {
         "success": True,
         "user_location": {
@@ -699,7 +933,10 @@ async def calculate_hospital_routes(request: HospitalRouteRequest):
         "algorithms_used": request.algorithms,
         "routes": all_routes,
         "total_routes": len(all_routes),
-        "hospitals_analyzed": len(hospitales)
+        "hospitals_analyzed": len(hospitales),
+        "comparison": comparison,
+        "algorithm_errors": algorithm_errors,
+        "algorithm_runs": algorithm_runs,
     }
 
 
@@ -822,7 +1059,7 @@ async def get_system_info():
             devices.append(device_info)
         
         cuda_info["devices"] = devices
-        recommendation = "✅ Aceleración GPU habilitada (puedes desmarcar el checkbox para forzar solo CPU)"
+        recommendation = "[OK] Aceleracion GPU habilitada (puedes desmarcar el checkbox para forzar solo CPU)"
         
     except ImportError:
         # CuPy no está disponible en este intérprete de Python
@@ -868,7 +1105,7 @@ async def get_system_info():
             "nvidia_gpu_name": nvidia_gpu_name,
             "cuda_version_system": cuda_version_system
         }
-        recommendation = "⚠️ Aceleración GPU no disponible - usando solo CPU"
+        recommendation = "[WARN] Aceleracion GPU no disponible - usando solo CPU"
         
     except Exception as e:
         # Cualquier otro error al inicializar CuPy/CUDA
@@ -879,7 +1116,7 @@ async def get_system_info():
             "nvidia_gpu_detected": nvidia_gpu_detected,
             "nvidia_gpu_name": nvidia_gpu_name
         }
-        recommendation = "⚠️ CUDA no pudo inicializarse - cálculos en CPU"
+        recommendation = "[WARN] CUDA no pudo inicializarse - calculos en CPU"
     
     return {
         "success": True,
@@ -901,13 +1138,18 @@ def _get_algorithm_instance(algo_name: str, use_cuda: bool):
     algorithms = {
         'dijkstra': DijkstraAlgorithm,
         'dijkstra_pq': DijkstraPriorityQueue,
+        'delta_stepping': DeltaSteppingGPU,
         'duan2025': Duan2025Algorithm,
         'khanna2022': Khanna2022Algorithm,
         'wang2021': Wang2021Algorithm
     }
     
-    algo_class = algorithms.get(algo_name.lower())
+    key = algo_name.lower()
+    algo_class = algorithms.get(key)
     if algo_class:
+        if key == "wang2021":
+            # Más particiones mejora el scheduler en grafos enormes
+            return algo_class(use_cuda=use_cuda, num_partitions=32)
         return algo_class(use_cuda=use_cuda)
     return None
 
@@ -1002,8 +1244,8 @@ app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
 if __name__ == "__main__":
     import uvicorn
     
-    print("🚀 Iniciando servidor backend...")
-    print("📊 API disponible en: http://localhost:8000")
-    print("📝 Documentación: http://localhost:8000/docs")
+    print("Iniciando servidor backend...")
+    print("API disponible en: http://localhost:8000")
+    print("Docs: http://localhost:8000/docs")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)

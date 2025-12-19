@@ -1,0 +1,67 @@
+[
+  {
+    "id": "MINSA001",
+    "nombre": "Hospital Regional del Cusco",
+    "tipo": "Hospital",
+    "categoria": "III-1",
+    "lat": -13.5226,
+    "lon": -71.9673,
+    "direccion": "Av. de la Cultura s/n",
+    "emergencia": true,
+    "uci": true,
+    "ambulancia": true,
+    "telefono": "(084) 223030"
+  },
+  {
+    "id": "ESSALUD001",
+    "nombre": "Hospital Nacional Adolfo Guevara Velasco - EsSalud",
+    "tipo": "Hospital",
+    "categoria": "III-1",
+    "lat": -13.5188,
+    "lon": -71.9644,
+    "direccion": "Av. de la Cultura 705",
+    "emergencia": true,
+    "uci": true,
+    "ambulancia": true,
+    "telefono": "(084) 249090"
+  },
+  {
+    "id": "MINSA002",
+    "nombre": "Hospital Antonio Lorena",
+    "tipo": "Hospital",
+    "categoria": "II-2",
+    "lat": -13.5195,
+    "lon": -71.965,
+    "direccion": "Av. de la Cultura 720",
+    "emergencia": true,
+    "uci": false,
+    "ambulancia": true,
+    "telefono": "(084) 226511"
+  },
+  {
+    "id": "MINSA003",
+    "nombre": "Hospital Quillabamba",
+    "tipo": "Hospital",
+    "categoria": "II-1",
+    "lat": -12.8592,
+    "lon": -72.6945,
+    "direccion": "Jr. Espinar s/n",
+    "emergencia": true,
+    "uci": false,
+    "ambulancia": true,
+    "telefono": "(084) 281045"
+  },
+  {
+    "id": "MINSA004",
+    "nombre": "Hospital Sicuani",
+    "tipo": "Hospital",
+    "categoria": "II-1",
+    "lat": -14.2694,
+    "lon": -71.2259,
+    "direccion": "Av. Centenario s/n",
+    "emergencia": true,
+    "uci": false,
+    "ambulancia": true,
+    "telefono": "(084) 351031"
+  }
+]

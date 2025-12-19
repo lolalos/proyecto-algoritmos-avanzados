@@ -1,0 +1,115 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -71.9673,
+          -13.5226
+        ]
+      },
+      "properties": {
+        "codigo": "MINSA001",
+        "nombre": "Hospital Regional del Cusco",
+        "categoria": "III-1",
+        "tipo": "Hospital",
+        "direccion": "Av. de la Cultura s/n",
+        "distrito": "Cusco",
+        "provincia": "Cusco",
+        "emergencia": true,
+        "uci": true,
+        "ambulancia": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -71.9644,
+          -13.5188
+        ]
+      },
+      "properties": {
+        "codigo": "ESSALUD001",
+        "nombre": "Hospital Nacional Adolfo Guevara Velasco - EsSalud",
+        "categoria": "III-1",
+        "tipo": "Hospital",
+        "direccion": "Av. de la Cultura 705",
+        "distrito": "Cusco",
+        "provincia": "Cusco",
+        "emergencia": true,
+        "uci": true,
+        "ambulancia": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -71.965,
+          -13.5195
+        ]
+      },
+      "properties": {
+        "codigo": "MINSA002",
+        "nombre": "Hospital Antonio Lorena",
+        "categoria": "II-2",
+        "tipo": "Hospital",
+        "direccion": "Av. de la Cultura 720",
+        "distrito": "Cusco",
+        "provincia": "Cusco",
+        "emergencia": true,
+        "uci": false,
+        "ambulancia": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -72.6945,
+          -12.8592
+        ]
+      },
+      "properties": {
+        "codigo": "MINSA003",
+        "nombre": "Hospital Quillabamba",
+        "categoria": "II-1",
+        "tipo": "Hospital",
+        "direccion": "Jr. Espinar s/n",
+        "distrito": "Santa Ana",
+        "provincia": "La Convención",
+        "emergencia": true,
+        "uci": false,
+        "ambulancia": true
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -71.2259,
+          -14.2694
+        ]
+      },
+      "properties": {
+        "codigo": "MINSA004",
+        "nombre": "Hospital Sicuani",
+        "categoria": "II-1",
+        "tipo": "Hospital",
+        "direccion": "Av. Centenario s/n",
+        "distrito": "Sicuani",
+        "provincia": "Canchis",
+        "emergencia": true,
+        "uci": false,
+        "ambulancia": true
+      }
+    }
+  ]
+}
